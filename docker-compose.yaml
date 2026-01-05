@@ -1,9 +1,6 @@
 version: '3.8'
 
 services:
-  # ===============================
-  # Application Database (Postgres)
-  # ===============================
   app-postgres:
     image: postgres:15-alpine
     container_name: application-db
@@ -15,49 +12,47 @@ services:
       - app-postgres-data:/var/lib/postgresql/data
     networks:
       - backend
+    ports:
+      - "5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${APP_DB_USER} -d ${APP_DB_NAME}"]
       interval: 10s
       timeout: 5s
       retries: 5
 
-  # ==================================
-  # Metabase Metadata Database (Postgres)
-  # ==================================
-  metabase-postgres:
+  analytics-postgres:
     image: postgres:15-alpine
-    container_name: metabase-postgres
+    container_name: analytics-postgres
     environment:
-      POSTGRES_DB: ${METABASE_DB_NAME}
-      POSTGRES_USER: ${METABASE_DB_USER}
-      POSTGRES_PASSWORD: ${METABASE_DB_PASSWORD}
+      POSTGRES_DB: ${ANALYTICS_DB_NAME}
+      POSTGRES_USER: ${ANALYTICS_DB_USER}
+      POSTGRES_PASSWORD: ${ANALYTICS_DB_PASSWORD}
     volumes:
-      - metabase-postgres-data:/var/lib/postgresql/data
+      - analytics-postgres-data:/var/lib/postgresql/data
+      - ./init-analytics.sql:/docker-entrypoint-initdb.d/init.sql
     networks:
       - backend
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${METABASE_DB_USER} -d ${METABASE_DB_NAME}"]
+      test: ["CMD-SHELL", "pg_isready -U ${ANALYTICS_DB_USER} -d ${ANALYTICS_DB_NAME}"]
       interval: 10s
       timeout: 5s
       retries: 5
 
-  # ===============================
-  # Metabase
-  # ===============================
   metabase:
     image: metabase/metabase:v0.48.0
     container_name: metabase
     environment:
-      MB_DB_TYPE: postgres
-      MB_DB_HOST: metabase-postgres
-      MB_DB_PORT: 5432
+      MB_DB_TYPE: postgres  # FIXED: Changed from mysql to postgres
       MB_DB_DBNAME: ${METABASE_DB_NAME}
+      MB_DB_PORT: 5432      # Internal port for analytics-postgres
       MB_DB_USER: ${METABASE_DB_USER}
       MB_DB_PASS: ${METABASE_DB_PASSWORD}
-
+      MB_DB_HOST: analytics-postgres # FIXED: Use the service name
       MB_EMBEDDING_SECRET_KEY: ${METABASE_EMBEDDING_SECRET}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
-      metabase-postgres:
+      analytics-postgres:
         condition: service_healthy
     networks:
       - backend
@@ -70,16 +65,13 @@ services:
       retries: 10
       start_period: 90s
 
-  # ===============================
-  # Application Backend (FastAPI)
-  # ===============================
   app-backend:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: app-backend
     environment:
-      # FIX: Prevents "Bad address (os error 14)" by using polling
+      # RE-ADDED: Fix for the WatchfilesRustInternalError
       WATCHFILES_FORCE_POLLING: "true"
       
       APP_DB_HOST: application-db
@@ -94,12 +86,13 @@ services:
       METABASE_EMAIL: ${METABASE_EMAIL}
       METABASE_PASSWORD: ${METABASE_PASSWORD}
       METABASE_EMBEDDING_SECRET: ${METABASE_EMBEDDING_SECRET}
-      ANALYTICS_DB_HOST: ${ANALYTICS_DB_HOST}
-      ANALYTICS_DB_PORT: ${ANALYTICS_DB_PORT}
-      ANALYTICS_DB_NAME: ${ANALYTICS_DB_NAME}
-      ANALYTICS_DB_USER: ${ANALYTICS_DB_USER}
-      ANALYTICS_DB_PASSWORD: ${ANALYTICS_DB_PASSWORD}
-
+      # ... (keep all your SQLServer and Analytics variables)
+      ANALYTICS_DB_HOST: analytics-postgres
+      ANALYTICS_DB_PORT: 5432
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "8000:8000"
     depends_on:
       app-postgres:
         condition: service_healthy
@@ -107,11 +100,25 @@ services:
         condition: service_healthy
     networks:
       - backend
-    ports:
-      - "8000:8000"
     volumes:
-      # This mounts your local 'app' folder to '/app/app' inside the container
       - ./app:/app/app
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: react-frontend
+    environment:
+      - VITE_API_URL=http://localhost:8000
+    ports:
+      - "5173:5173"
+    depends_on:
+      - app-backend
+    networks:
+      - backend
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules # Prevents host node_modules from overwriting container node_modules
 
 networks:
   backend:
@@ -119,4 +126,4 @@ networks:
 
 volumes:
   app-postgres-data:
-  metabase-postgres-data:
+  analytics-postgres-data:
