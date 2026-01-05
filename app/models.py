@@ -3,6 +3,7 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import JSONB
 from datetime import datetime
 from app.database import Base
+from typing import Optional
 
 workspace_users = Table(
     'workspace_users',
@@ -18,6 +19,8 @@ class User(Base):
     email = Column(String, unique=True, index=True, nullable=False)
     hashed_password = Column(String, nullable=False)
     full_name = Column(String)
+    metabase_user_id :Optional[int]= Column(Integer, nullable=True)  # NEW: Store Metabase user ID
+    metabase_password :Optional[str] = Column(String, nullable=True)  # NEW: Store Metabase password (hashed)
     created_at = Column(DateTime, default=datetime.utcnow)
     
     workspaces = relationship('Workspace', secondary=workspace_users, back_populates='users')

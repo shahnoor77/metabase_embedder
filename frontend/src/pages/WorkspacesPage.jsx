@@ -1,11 +1,14 @@
 import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
-import { Briefcase, Plus, Search, Users, BarChart3 } from 'lucide-react'
-import { workspaceAPI, dashboardAPI } from '../services/api'
+import { Briefcase, Plus, Search, ExternalLink } from 'lucide-react'
+import { workspaceAPI } from '../services/api'
+import { metabaseService } from '../services/metabase'
+import { useAuth } from '../context/AuthContext'
 import Loading from '../components/Common/Loading'
 import Modal from '../components/Common/Modal'
 import toast from 'react-hot-toast'
 import { generateSlug } from '../utils/helpers'
+import WorkspaceCard from '../components/Workspace/WorkspaceCard'
 
 export default function WorkspacesPage() {
   const [workspaces, setWorkspaces] = useState([])
@@ -14,6 +17,7 @@ export default function WorkspacesPage() {
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [creating, setCreating] = useState(false)
   const [newWorkspace, setNewWorkspace] = useState({ name: '', slug: '' })
+  const { user } = useAuth()
 
   useEffect(() => {
     loadWorkspaces()
@@ -58,7 +62,6 @@ export default function WorkspacesPage() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Workspaces</h1>
@@ -75,7 +78,6 @@ export default function WorkspacesPage() {
         </button>
       </div>
 
-      {/* Search */}
       <div className="card">
         <div className="relative">
           <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
@@ -89,7 +91,6 @@ export default function WorkspacesPage() {
         </div>
       </div>
 
-      {/* Workspaces Grid */}
       {filteredWorkspaces.length === 0 ? (
         <div className="card text-center py-16">
           <Briefcase className="w-20 h-20 text-gray-300 mx-auto mb-4" />
@@ -123,7 +124,6 @@ export default function WorkspacesPage() {
         </div>
       )}
 
-      {/* Create Modal */}
       <Modal
         isOpen={showCreateModal}
         onClose={() => setShowCreateModal(false)}
@@ -169,6 +169,16 @@ export default function WorkspacesPage() {
             </p>
           </div>
 
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+            <h4 className="font-medium text-blue-900 mb-2">What's included:</h4>
+            <ul className="text-sm text-blue-800 space-y-1">
+              <li>• Private Metabase collection</li>
+              <li>• Full dashboard creation access</li>
+              <li>• SQL query builder</li>
+              <li>• Team collaboration tools</li>
+            </ul>
+          </div>
+
           <div className="flex space-x-3 pt-4">
             <button
               type="button"
@@ -189,54 +199,5 @@ export default function WorkspacesPage() {
         </form>
       </Modal>
     </div>
-  )
-}
-
-function WorkspaceCard({ workspace, index }) {
-  const [dashboardCount, setDashboardCount] = useState(0)
-
-  useEffect(() => {
-    loadDashboardCount()
-  }, [])
-
-  const loadDashboardCount = async () => {
-    try {
-      const response = await dashboardAPI.getAll(workspace.id)
-      setDashboardCount(response.data.length)
-    } catch (error) {
-      console.error('Error loading dashboard count:', error)
-    }
-  }
-
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: index * 0.1 }}
-      whileHover={{ y: -4 }}
-      className="card hover:shadow-lg transition-all cursor-pointer"
-    >
-      <div className="flex items-start justify-between mb-4">
-        <div className="w-14 h-14 bg-gradient-to-br from-primary-500 to-primary-700 rounded-xl flex items-center justify-center">
-          <Briefcase className="w-7 h-7 text-white" />
-        </div>
-      </div>
-
-      <h3 className="text-xl font-bold text-gray-900 mb-2">{workspace.name}</h3>
-      <p className="text-sm text-gray-600 mb-4">/{workspace.slug}</p>
-
-      <div className="flex items-center justify-between pt-4 border-t border-gray-200">
-        <div className="flex items-center space-x-4 text-sm text-gray-600">
-          <div className="flex items-center space-x-1">
-            <BarChart3 className="w-4 h-4" />
-            <span>{dashboardCount} dashboards</span>
-          </div>
-          <div className="flex items-center space-x-1">
-            <Users className="w-4 h-4" />
-            <span>1 member</span>
-          </div>
-        </div>
-      </div>
-    </motion.div>
   )
 }
