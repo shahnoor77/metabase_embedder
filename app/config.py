@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     DATABASE_URL: str
 
     # JWT
-    JWT_SECRET_KEY: str
+    JWT_SECRET: str
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRATION_HOURS: int = 24
 

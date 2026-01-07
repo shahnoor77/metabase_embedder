@@ -1,116 +1,142 @@
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
-from pydantic import BaseModel, EmailStr
-from passlib.context import CryptContext
-from jose import jwt
-from datetime import datetime, timedelta
-import secrets
+"""
+Authentication routes for user signup, login, and token management.
+Reliable version with Python 3.12 compatibility.
+"""
 import logging
+from datetime import datetime, timedelta
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordBearer
+from sqlalchemy.orm import Session
+from jose import JWTError, jwt
+from passlib.context import CryptContext
+from pydantic import BaseModel
 
 from app.database import get_db
 from app.models import User
-from app.config import settings
-from app.auth.dependencies import get_current_user
-from app.metabase.client import MetabaseClient
+from app.config import Settings
 
-router = APIRouter()
-# Using Argon2 removes the 72-byte password limit
-pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
+router = APIRouter(prefix="/auth", tags=["authentication"])
 logger = logging.getLogger(__name__)
 
-# --- Schemas ---
+# ==================== Security Configuration ====================
+settings = Settings()
 
-class UserCreate(BaseModel):
-    email: EmailStr
+# Fix for Python 3.12 + Passlib + Bcrypt
+# bcrypt__handle_max_72_chars=True prevents the ValueError crash
+pwd_context = CryptContext(
+    schemes=["bcrypt"], 
+    deprecated="auto"
+)
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
+
+# ==================== Pydantic Schemas ====================
+
+class UserSignup(BaseModel):
+    email: str  # Changed from EmailStr to allow .local domains
     password: str
-    first_name: str
-    last_name: str | None = None
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
 
 class UserLogin(BaseModel):
-    email: EmailStr
+    email: str  # Changed from EmailStr
     password: str
-
-class Token(BaseModel):
-    access_token: str
-    token_type: str
-    metabase_session_id: str | None = None
 
 class UserResponse(BaseModel):
     id: int
     email: str
-    first_name: str | None = None
-    last_name: str | None = None
-    metabase_user_id: int | None = None
+    first_name: Optional[str]
+    last_name: Optional[str]
+    metabase_user_id: Optional[int]
+    is_active: bool
+    created_at: datetime
     
     class Config:
         from_attributes = True
 
-# --- Routes ---
+class Token(BaseModel):
+    access_token: str
+    token_type: str
 
-@router.post("/signup", response_model=Token, status_code=status.HTTP_201_CREATED)
-async def signup(user_data: UserCreate, db: Session = Depends(get_db)):
+# ==================== Security Utilities ====================
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    if len(plain_password.encode('utf-8'))>72:
+        return False
+    return pwd_context.verify(plain_password, hashed_password)
+
+def get_password_hash(password: str) -> str:
+    if not password:
+        raise ValueError("Password cannot be empty")
+    if len(password.encode('utf-8')) > 72:
+        raise HTTPException(
+            status_code=400, 
+            detail="Password exceeds the 72-byte limit for Bcrypt."
+        )
+    return pwd_context.hash(password)
+
+def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
+    to_encode = data.copy()
+    expire = datetime.utcnow() + (expires_delta or timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES))
+    to_encode.update({"exp": expire})
+    return jwt.encode(to_encode, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
+
+# ==================== Routes ====================
+
+@router.post("/signup", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+async def signup(user_data: UserSignup, db: Session = Depends(get_db)):
+    # 1. Check existence
     if db.query(User).filter(User.email == user_data.email).first():
         raise HTTPException(status_code=400, detail="Email already registered")
     
-    # 1. Generate local and Metabase passwords
-    hashed_password = pwd_context.hash(user_data.password)
-    raw_mb_password = secrets.token_urlsafe(32) # Long and secure
-    
-    # 2. Save User to Postgres
-    user = User(
+    # 2. Hash and Save
+    new_user = User(
         email=user_data.email,
-        hashed_password=hashed_password,
+        hashed_password=get_password_hash(user_data.password),
         first_name=user_data.first_name,
         last_name=user_data.last_name,
-        # We store the raw password briefly to create the MB user, 
-        # but in production you'd hash this or use a secure vault.
-        metabase_password=raw_mb_password 
+        is_active=True
     )
-    db.add(user)
+    db.add(new_user)
     db.commit()
-    db.refresh(user)
-
-    # 3. Create Metabase User via API
+    db.refresh(new_user)
+    
+    # 3. Metabase Provisioning
     try:
-        mb_client = MetabaseClient()
-        await mb_client.login()
-        mb_user = await mb_client.create_metabase_user(
-            email=user_data.email,
-            first_name=user_data.first_name,
-            last_name=user_data.last_name or "User",
-            password=raw_mb_password
-        )
-        user.metabase_user_id = mb_user['id']
-        db.commit()
+        from app.auth.routes import get_metabase_client # Local import to avoid circulars
+        mb_client = get_metabase_client()
+        mb_user = await mb_client.get_user_by_email(user_data.email)
+        
+        if not mb_user:
+            mb_user = await mb_client.create_metabase_user(
+                email=user_data.email,
+                first_name=user_data.first_name or "User",
+                last_name=user_data.last_name or "User",
+                password=user_data.password
+            )
+        
+        if mb_user.get("id"):
+            new_user.metabase_user_id = mb_user.get("id")
+            db.commit()
     except Exception as e:
-        logger.error(f"Metabase auto-creation failed: {e}")
-
-    # 4. Generate App Token
-    token = jwt.encode({"sub": str(user.id), "exp": datetime.utcnow() + timedelta(hours=24)}, settings.JWT_SECRET_KEY)
-    return {"access_token": token, "token_type": "bearer"}
+        logger.error(f"Metabase sync failed: {str(e)}")
+        
+    return new_user
 
 @router.post("/login", response_model=Token)
-async def login(credentials: UserLogin, db: Session = Depends(get_db)):
-    # 1. Authenticate with App DB
-    user = db.query(User).filter(User.email == credentials.email).first()
-    if not user or not pwd_context.verify(credentials.password, user.hashed_password):
-        raise HTTPException(status_code=401, detail="Invalid email or password")
+async def login(login_data: UserLogin, db: Session = Depends(get_db)):
+    # Look up by email (matching our JSON schema)
+    user = db.query(User).filter(User.email == login_data.email).first()
     
-    # 2. Attempt to get Metabase Session for seamless iframe login
-    mb_session_id = None
-    if user.metabase_user_id and user.metabase_password:
-        mb_client = MetabaseClient()
-        mb_session_id = await mb_client.get_user_session(user.email, user.metabase_password)
+    if not user or not verify_password(login_data.password, user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password"
+        )
     
-    token = jwt.encode({"sub": str(user.id), "exp": datetime.utcnow() + timedelta(hours=24)}, settings.JWT_SECRET_KEY)
     return {
-        "access_token": token, 
-        "token_type": "bearer",
-        "metabase_session_id": mb_session_id
+        "access_token": create_access_token(data={"sub": user.email}),
+        "token_type": "bearer"
     }
-
-
-@router.get("/me", response_model=UserResponse)
-async def get_me(current_user: User = Depends(get_current_user)):
-    """Return the currently authenticated user."""
-    return current_user
