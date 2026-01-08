@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     ANALYTICS_DB_USER: Optional[str] = None
     ANALYTICS_DB_PASSWORD: Optional[str] = None
 
+    ACCESS_TOKEN_EXPIRE_MINUTES: int
+
     # Pydantic configuration to prevent 'extra_forbidden' errors
     model_config = SettingsConfigDict(
         env_file=".env",

@@ -5,7 +5,7 @@ Reliable version with Python 3.12 compatibility.
 import logging
 from datetime import datetime, timedelta
 from typing import Optional
-
+import bcrypt
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
@@ -27,7 +27,8 @@ settings = Settings()
 # bcrypt__handle_max_72_chars=True prevents the ValueError crash
 pwd_context = CryptContext(
     schemes=["bcrypt"], 
-    deprecated="auto"
+    deprecated="auto",
+    bcrypt__ident="2b"
 )
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
@@ -60,28 +61,72 @@ class Token(BaseModel):
     access_token: str
     token_type: str
 
+class TokenData(BaseModel):
+    email: Optional[str] = None
+
+
 # ==================== Security Utilities ====================
-
-def verify_password(plain_password: str, hashed_password: str) -> bool:
-    if len(plain_password.encode('utf-8'))>72:
-        return False
-    return pwd_context.verify(plain_password, hashed_password)
-
 def get_password_hash(password: str) -> str:
     if not password:
         raise ValueError("Password cannot be empty")
-    if len(password.encode('utf-8')) > 72:
+    password_bytes = password.encode('utf-8')
+    if len(password_bytes) > 72:
         raise HTTPException(
-            status_code=400, 
-            detail="Password exceeds the 72-byte limit for Bcrypt."
+            status_code=status.HTTP_400_BAD_REQUEST, 
+            detail="Password is too long (max 72 character)."
         )
-    return pwd_context.hash(password)
+    salt = bcrypt.gensalt()
+    hashed = bcrypt.hashpw(password_bytes, salt)
+    return hashed.decode('utf-8')
 
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    try:
+        password_bytes = plain_password.encode('utf-8')
+        hashed_bytes = hashed_password.encode('utf-8')
+        return bcrypt.checkpw(password_bytes, hashed_bytes)
+    except Exception as e:
+        logger.error(f"Password varification error: {e}")
+        return False
+        
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     to_encode = data.copy()
     expire = datetime.utcnow() + (expires_delta or timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES))
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
+
+# Add this function in the Security Utilities section
+async def get_current_user(
+    token: str = Depends(oauth2_scheme),
+    db: Session = Depends(get_db)
+) -> User:
+    """Dependency to get the current authenticated user."""
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    
+    try:
+        # Decode the JWT
+        payload = jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
+        email: str = payload.get("sub")
+        if email is None:
+            raise credentials_exception
+        token_data = TokenData(email=email)
+    except JWTError:
+        raise credentials_exception
+    
+    # Find user in DB
+    user = db.query(User).filter(User.email == token_data.email).first()
+    
+    if user is None:
+        raise credentials_exception
+    
+    if not user.is_active:
+        raise HTTPException(status_code=400, detail="Inactive user")
+    
+    return user
+
 
 # ==================== Routes ====================
 
@@ -105,8 +150,13 @@ async def signup(user_data: UserSignup, db: Session = Depends(get_db)):
     
     # 3. Metabase Provisioning
     try:
-        from app.auth.routes import get_metabase_client # Local import to avoid circulars
-        mb_client = get_metabase_client()
+        from app.metabase.client import MetabaseClient
+        mb_client = MetabaseClient(
+            base_url=settings.METABASE_URL,
+            admin_email=settings.METABASE_ADMIN_EMAIL,
+            admin_password=settings.METABASE_ADMIN_EMAIL,
+            embedding_secret=settings.METABASE_EMBEDDING_SECRET
+        )
         mb_user = await mb_client.get_user_by_email(user_data.email)
         
         if not mb_user:

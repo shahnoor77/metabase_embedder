@@ -143,3 +143,87 @@ class MetabaseClient:
                 "native": "write"
             }
             await client.put(f"{self.base_url}/api/permissions/graph", json=graph, headers=self._get_headers())
+    
+    # ==================== COLLECTIONS & GROUPS ====================
+
+    async def create_collection(self, name: str, description: str = ""):
+        """Create a new collection for a workspace."""
+        await self._get_session_token()
+        payload = {
+            "name": name,
+            "color": "#509EE3",
+            "description": description,
+            "parent_id": None
+        }
+        async with httpx.AsyncClient() as client:
+            response = await client.post(f"{self.base_url}/api/collection", json=payload, headers=self._get_headers())
+            response.raise_for_status()
+            return response.json()
+
+    async def enable_collection_embedding(self, collection_id: int):
+        """Enable embedding for a specific collection."""
+        await self._get_session_token()
+        async with httpx.AsyncClient() as client:
+            # Note: Some Metabase versions use a PUT on the collection, others a specific setting
+            response = await client.put(
+                f"{self.base_url}/api/collection/{collection_id}", 
+                json={"enabled_embedding": True}, 
+                headers=self._get_headers()
+            )
+            return response.status_code
+
+    async def create_group(self, name: str):
+        """Create a new permission group for the workspace."""
+        await self._get_session_token()
+        async with httpx.AsyncClient() as client:
+            response = await client.post(f"{self.base_url}/api/permissions/group", json={"name": name}, headers=self._get_headers())
+            response.raise_for_status()
+            return response.json()
+
+    async def set_collection_permissions(self, group_id: int, collection_id: int, permission: str = "write"):
+        """Give a group access to a specific collection."""
+        await self._get_session_token()
+        async with httpx.AsyncClient() as client:
+            # Metabase handles collection perms via the permissions graph
+            graph_resp = await client.get(f"{self.base_url}/api/permissions/membership_graph", headers=self._get_headers())
+            graph = graph_resp.json()
+            # If membership_graph isn't available, standard graph for collections:
+            # This is a simplified version; production might need deeper graph traversal
+            payload = {"groups": {str(group_id): {str(collection_id): permission}}}
+            return await client.put(f"{self.base_url}/api/collection/graph", json=payload, headers=self._get_headers())
+
+    # ==================== USER PROVISIONING ====================
+
+    async def get_user_by_email(self, email: str):
+        """Check if a user already exists in Metabase."""
+        await self._get_session_token()
+        async with httpx.AsyncClient() as client:
+            response = await client.get(f"{self.base_url}/api/user", headers=self._get_headers())
+            users = response.json()
+            for user in users:
+                if user.get("email") == email:
+                    return user
+            return None
+
+    async def create_metabase_user(self, email: str, first_name: str, last_name: str, password: str):
+        """Create a new user account in Metabase."""
+        await self._get_session_token()
+        payload = {
+            "first_name": first_name,
+            "last_name": last_name,
+            "email": email,
+            "password": password
+        }
+        async with httpx.AsyncClient() as client:
+            response = await client.post(f"{self.base_url}/api/user", json=payload, headers=self._get_headers())
+            response.raise_for_status()
+            return response.json()
+
+    async def add_user_to_group(self, user_id: int, group_id: int):
+        """Add a Metabase user to a specific permission group."""
+        await self._get_session_token()
+        payload = {"group_id": group_id, "user_id": user_id}
+        async with httpx.AsyncClient() as client:
+            response = await client.post(f"{self.base_url}/api/permissions/membership", json=payload, headers=self._get_headers())
+            return response.json()
+
