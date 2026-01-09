@@ -218,3 +218,23 @@ class MetabaseClient:
         }
         token = jwt.encode(payload, self.embedding_secret, algorithm="HS256")
         return f"/embed/collection/{token}"
+    
+    async def enable_dashboard_embedding(self, dashboard_id: int):
+        """
+        The 'Automation' fix: Programmatically enables embedding for a specific dashboard.
+        This prevents the 'Embedding is not enabled for this object' error.
+        """
+        await self._get_session_token()
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.put(
+                    f"{self.base_url}/api/dashboard/{dashboard_id}", 
+                    json={"enable_embedding": True}, 
+                    headers=self._get_headers()
+                )
+                response.raise_for_status()
+                logger.info(f"Successfully enabled embedding for Metabase dashboard {dashboard_id}")
+                return True
+            except Exception as e:
+                logger.error(f"Failed to enable embedding for dashboard {dashboard_id}: {str(e)}")
+                return False
