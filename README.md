@@ -582,20 +582,5 @@ Generate secure embedding URL.
 
 ---
 
-## 🤝 Contributing
-
-### Code Style
-- Backend: Follow PEP 8, use Black formatter
-- Frontend: ESLint + Prettier with Airbnb config
-
-### Commit Messages
-```
-feat: add workspace deletion endpoint
-fix: resolve CORS issue for production domain
-docs: update API reference for new endpoints
-```
-
----
-
 **Last Updated:** January 8, 2026  
 **System Status:** ✅ Backend Operational | ⚠️ Frontend Needs Fixes  
