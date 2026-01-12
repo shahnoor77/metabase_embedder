@@ -17,7 +17,8 @@ class Settings(BaseSettings):
     JWT_EXPIRATION_HOURS: int = 24
 
     # Metabase (Aligned with main.py)
-    METABASE_URL: str = "http://metabase:3000"
+    METABASE_URL: str = "http://metabase:3000"  # Internal Docker URL for backend
+    METABASE_PUBLIC_URL: str = "http://localhost:3000"  # Public URL for frontend embeds
     METABASE_ADMIN_EMAIL: str 
     METABASE_ADMIN_PASSWORD: str
     METABASE_EMBEDDING_SECRET: str

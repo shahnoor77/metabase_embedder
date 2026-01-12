@@ -28,7 +28,8 @@ def get_metabase_client() -> MetabaseClient:
         base_url=settings.METABASE_URL,
         admin_email=settings.METABASE_ADMIN_EMAIL,
         admin_password=settings.METABASE_ADMIN_PASSWORD,
-        embedding_secret=settings.METABASE_EMBEDDING_SECRET
+        embedding_secret=settings.METABASE_EMBEDDING_SECRET,
+        public_url=getattr(settings, 'METABASE_PUBLIC_URL', settings.METABASE_URL)
     )
 
 # ==================== Pydantic Schemas ====================
@@ -407,6 +408,16 @@ async def list_dashboards(
     except Exception as sync_err:
         logger.error(f"Dashboard sync failed: {sync_err}")
         # Continue even if sync fails
+    else:
+        # After sync, ensure all dashboards in this workspace are embedding-enabled
+        dashboards = db.query(Dashboard).filter(
+            Dashboard.workspace_id == workspace_id
+        ).all()
+        for dash in dashboards:
+            try:
+                await mb_client.ensure_dashboard_embedding(dash.metabase_dashboard_id)
+            except Exception as embed_err:
+                logger.warning(f"Failed to ensure embedding for dashboard {dash.id}: {embed_err}")
     
     # Return dashboards from database
     dashboards = db.query(Dashboard).filter(
@@ -444,9 +455,12 @@ async def get_dashboard_embed_url(
             detail="Access denied to this dashboard"
         )
     
-    # Generate embedded URL (returns just the path)
+    await mb_client.ensure_dashboard_embedding(dashboard.metabase_dashboard_id)
+    
+    # FIX: Pass current_user.email to the client
     url_path = mb_client.get_dashboard_embed_url(
         dashboard_id=dashboard.metabase_dashboard_id,
+        user_email=current_user.email,  # <--- REQUIRED
         filters={}
     )
     
@@ -463,7 +477,11 @@ async def get_workspace_collection_url(
     db: Session = Depends(get_db),
     mb_client: MetabaseClient = Depends(get_metabase_client)
 ):
-    """Returns a JWT-signed URL for the entire workspace collection."""
+    """
+    Returns a JWT-signed URL for the entire workspace collection.
+    Ensures collection embedding is enabled before generating the URL.
+    """
+    # 1. Fetch workspace and validate existence
     workspace = db.query(Workspace).filter_by(
         id=workspace_id,
         is_active=True
@@ -475,7 +493,7 @@ async def get_workspace_collection_url(
             detail="Workspace collection not found"
         )
     
-    # Check access
+    # 2. Check user access to this specific workspace
     member = db.query(WorkspaceMember).filter_by(
         workspace_id=workspace_id,
         user_id=current_user.id
@@ -487,10 +505,59 @@ async def get_workspace_collection_url(
             detail="Access denied to this workspace"
         )
     
-    # Generate embedded collection URL (returns just the path)
-    url_path = mb_client.get_embedded_collection_url(workspace.metabase_collection_id)
+    # 3. CRITICAL: Ensure collection embedding is enabled in Metabase
+    try:
+        # Verify the collection exists in Metabase
+        collection = await mb_client.get_collection(workspace.metabase_collection_id)
+        if not collection:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Collection {workspace.metabase_collection_id} not found in Metabase"
+            )
+        
+        # Ensure 'enable_embedding' is set to True via API
+        # This handles the 'Not Found' error for interactive frames
+        embedding_enabled = await mb_client.enable_resource_embedding(
+            workspace.metabase_collection_id, 
+            resource_type="collection"
+        )
+        
+        if not embedding_enabled:
+            logger.warning(f"Could not enable embedding for collection {workspace.metabase_collection_id}")
+            # Fallback check
+            if collection.get("enable_embedding") is not True:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Failed to enable collection embedding. Check Metabase Admin settings."
+                )
+        
+        logger.info(f"Ensured embedding is enabled for collection {workspace.metabase_collection_id}")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error ensuring collection embedding: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to prepare collection for embedding: {str(e)}"
+        )
     
-    return {
-        "url": url_path,
-        "expires_in_minutes": 60
-    }
+    # 4. Generate the signed URL
+    # FIX: We now pass current_user.email to satisfy the new client method signature
+    # and provide the identity needed for Interactive Embedding.
+    try:
+        url_path = mb_client.get_embedded_collection_url(
+            collection_id=workspace.metabase_collection_id,
+            user_email=current_user.email
+        )
+        
+        return {
+            "url": url_path,
+            "expires_in_minutes": 60
+        }
+    except Exception as e:
+        logger.error(f"Failed to generate signed URL: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Could not generate secure embedding link."
+        )

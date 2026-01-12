@@ -2,13 +2,12 @@ import { useState } from 'react'
 import { Briefcase, Loader2 } from 'lucide-react'
 import { workspaceAPI } from '../../services/api'
 import toast from 'react-hot-toast'
-import { generateSlug } from '../../utils/helpers'
 
 export default function CreateWorkspace({ onSuccess, onCancel }) {
   const [loading, setLoading] = useState(false)
   const [formData, setFormData] = useState({
     name: '',
-    slug: '',
+    description: '',
   })
 
   const handleSubmit = async (e) => {
@@ -26,13 +25,6 @@ export default function CreateWorkspace({ onSuccess, onCancel }) {
     }
   }
 
-  const handleNameChange = (e) => {
-    const name = e.target.value
-    setFormData({
-      name,
-      slug: generateSlug(name),
-    })
-  }
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
@@ -65,16 +57,14 @@ export default function CreateWorkspace({ onSuccess, onCancel }) {
 
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-2">
-            Workspace Slug <span className="text-red-500">*</span>
+            Description
           </label>
-          <input
-            type="text"
-            value={formData.slug}
-            onChange={(e) => setFormData({ ...formData, slug: e.target.value })}
+          <textarea
+            value={formData.description}
+            onChange={(e) => setFormData({ ...formData, description: e.target.value })}
             className="input-field"
-            placeholder="e.g., marketing-analytics"
-            required
-            pattern="[a-z0-9-]+"
+            placeholder="Optional workspace description"
+            rows="3"
           />
         </div>
       </div>

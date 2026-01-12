@@ -30,10 +30,12 @@ export const AuthProvider = ({ children }) => {
 
   const register = async (email, password, firstName, lastName) => {
     const result = await authService.register(email, password, firstName, lastName)
+    // Backend returns UserResponse (not Token) after signup
+    // User needs to login separately to get access token
     if (result.success) {
-      localStorage.setItem('token', result.data.access_token)
+      // Store email for potential auto-login, but don't set token yet
       localStorage.setItem('userEmail', email)
-      setUser({ email, token: result.data.access_token })
+      // Note: User will need to login after signup to get access token
     }
     return result
   }

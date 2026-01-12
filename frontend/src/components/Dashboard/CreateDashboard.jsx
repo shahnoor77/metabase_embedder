@@ -33,24 +33,10 @@ export default function CreateDashboard({ onSuccess, onCancel }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault()
-    if (!formData.workspace_id) {
-      return toast.error('Please select a workspace')
-    }
-
-    setLoading(true)
-    try {
-      const response = await dashboardAPI.create({
-        ...formData,
-        workspace_id: parseInt(formData.workspace_id)
-      })
-      toast.success('Dashboard created successfully!')
-      onSuccess(response.data)
-    } catch (error) {
-      const errorMsg = error.response?.data?.detail || 'Failed to create dashboard'
-      toast.error(errorMsg)
-    } finally {
-      setLoading(false)
-    }
+    // Dashboard creation is not available via API
+    // Dashboards must be created directly in Metabase
+    toast.error('Dashboard creation is not available via API. Please create dashboards directly in Metabase by opening your workspace.')
+    onCancel()
   }
 
   if (fetchingWorkspaces) {

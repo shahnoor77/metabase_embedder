@@ -33,8 +33,8 @@ export default function Register() {
     const result = await register(email, password, firstName, lastName)
     
     if (result.success) {
-      toast.success('Account created successfully!')
-      navigate('/')
+      toast.success('Account created successfully! Please login.')
+      navigate('/login')
     } else {
       toast.error(result.error || 'Registration failed')
     }

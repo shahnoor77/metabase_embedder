@@ -4,6 +4,7 @@ import { workspaceAPI } from '../services/api'
 import Loading from '../components/Common/Loading'
 import Modal from '../components/Common/Modal'
 import WorkspaceCard from '../components/Workspace/WorkspaceCard'
+import WorkspaceViewer from '../components/Workspace/WorkspaceViewer'
 import { useAuth } from '../context/AuthContext'
 import toast from 'react-hot-toast'
 
@@ -177,13 +178,9 @@ export default function WorkspacesPage() {
             <input
               type="text"
               value={newWorkspace.name}
-              onChange={(e) => {
-                const name = e.target.value
-                setNewWorkspace({
-                  name,
-                  slug: generateSlug(name),
-                })
-              }}
+              onChange={(e) =>
+                setNewWorkspace({ ...newWorkspace, name: e.target.value })
+              }
               className="input-field"
               placeholder="e.g., Marketing Analytics"
               required
@@ -192,16 +189,16 @@ export default function WorkspacesPage() {
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              Workspace Slug
+              Description
             </label>
-            <input
-              type="text"
+            <textarea
               value={newWorkspace.description}
               onChange={(e) =>
                 setNewWorkspace({ ...newWorkspace, description: e.target.value })
               }
               className="input-field"
               placeholder="Optional workspace description"
+              rows="3"
             />
           </div>
 
@@ -242,6 +239,8 @@ export default function WorkspacesPage() {
 function WorkspaceListItem({ workspace }) {
   const { user } = useAuth()
   const [loading, setLoading] = useState(false)
+  const [showViewer, setShowViewer] = useState(false)
+  const [embedUrl, setEmbedUrl] = useState(null)
 
   const handleOpen = async () => {
     setLoading(true)
@@ -249,8 +248,9 @@ function WorkspaceListItem({ workspace }) {
       const response = await workspaceAPI.getEmbedUrl(workspace.id)
       const url = response.data.url
       if (url) {
-        window.open(url, '_blank', 'noopener,noreferrer')
-        toast.success('Opening Metabase...')
+        setEmbedUrl(url)
+        setShowViewer(true)
+        toast.success('Opening Metabase workspace...')
       } else {
         toast.error('No embed URL returned')
       }
@@ -283,6 +283,18 @@ function WorkspaceListItem({ workspace }) {
           {loading ? 'Opening...' : 'Open'}
         </button>
       </div>
+
+      {/* Workspace Viewer Modal */}
+      {showViewer && embedUrl && (
+        <WorkspaceViewer
+          workspace={workspace}
+          embedUrl={embedUrl}
+          onClose={() => {
+            setShowViewer(false)
+            setEmbedUrl(null)
+          }}
+        />
+      )}
     </div>
   )
 }

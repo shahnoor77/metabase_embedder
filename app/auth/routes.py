@@ -139,7 +139,8 @@ def get_metabase_client():
         base_url=settings.METABASE_URL,
         admin_email=settings.METABASE_ADMIN_EMAIL,
         admin_password=settings.METABASE_ADMIN_PASSWORD,
-        embedding_secret=settings.METABASE_EMBEDDING_SECRET
+        embedding_secret=settings.METABASE_EMBEDDING_SECRET,
+        public_url=getattr(settings, 'METABASE_PUBLIC_URL', settings.METABASE_URL)
     )
 
 

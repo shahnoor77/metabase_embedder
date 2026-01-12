@@ -4,10 +4,13 @@ import { Briefcase, BarChart3, Users, Calendar, ExternalLink, Loader2 } from 'lu
 import { dashboardAPI, workspaceAPI } from '../../services/api'
 import { formatDate } from '../../utils/helpers'
 import toast from 'react-hot-toast'
+import WorkspaceViewer from './WorkspaceViewer'
 
 export default function WorkspaceCard({ workspace, index }) {
   const [dashboardCount, setDashboardCount] = useState(0)
   const [loading, setLoading] = useState(false)
+  const [showViewer, setShowViewer] = useState(false)
+  const [embedUrl, setEmbedUrl] = useState(null)
 
   useEffect(() => {
     loadDashboardCount()
@@ -28,11 +31,34 @@ export default function WorkspaceCard({ workspace, index }) {
 
     try {
       const response = await workspaceAPI.getEmbedUrl(workspace.id)
-      const url = response.data.url || response.data.external_link
+      const url = response.data.url
 
       if (url) {
-        toast.success('Redirecting to Metabase...')
+        // Store URL and show viewer (or open in new tab based on user preference)
+        setEmbedUrl(url)
+        setShowViewer(true)
+        toast.success('Opening Metabase workspace...')
+      } else {
+        toast.error('Metabase is not yet configured for this workspace')
+      }
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to retrieve Metabase session')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleOpenInNewTab = async (e) => {
+    e.stopPropagation()
+    setLoading(true)
+
+    try {
+      const response = await workspaceAPI.getEmbedUrl(workspace.id)
+      const url = response.data.url
+
+      if (url) {
         window.open(url, '_blank', 'noopener,noreferrer')
+        toast.success('Opening Metabase in new tab...')
       } else {
         toast.error('Metabase is not yet configured for this workspace')
       }
@@ -54,13 +80,16 @@ export default function WorkspaceCard({ workspace, index }) {
         <div className="w-14 h-14 bg-gradient-to-br from-primary-500 to-primary-600 rounded-2xl flex items-center justify-center text-white shadow-lg group-hover:scale-105 transition-transform">
           <Briefcase className="w-7 h-7" />
         </div>
-        <button
-          onClick={handleOpenMetabase}
-          disabled={loading}
-          className="p-2 text-gray-400 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition-colors"
-        >
-          {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <ExternalLink className="w-5 h-5" />}
-        </button>
+        <div className="flex items-center space-x-1">
+          <button
+            onClick={handleOpenInNewTab}
+            disabled={loading}
+            className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+            title="Open in new tab"
+          >
+            {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <ExternalLink className="w-5 h-5" />}
+          </button>
+        </div>
       </div>
 
       <h3 className="text-xl font-bold text-gray-900 mb-1">{workspace.name}</h3>
@@ -90,9 +119,21 @@ export default function WorkspaceCard({ workspace, index }) {
           onClick={handleOpenMetabase}
           className="text-sm font-bold text-primary-600 hover:text-primary-700"
         >
-          Enter Workspace →
+          Open Workspace →
         </button>
       </div>
+
+      {/* Workspace Viewer Modal */}
+      {showViewer && embedUrl && (
+        <WorkspaceViewer
+          workspace={workspace}
+          embedUrl={embedUrl}
+          onClose={() => {
+            setShowViewer(false)
+            setEmbedUrl(null)
+          }}
+        />
+      )}
     </motion.div>
   )
 }

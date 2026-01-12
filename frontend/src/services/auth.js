@@ -3,7 +3,8 @@ import { authAPI } from './api'
 export const authService = {
   login: async (email, password) => {
     try {
-      const response = await authAPI.login({ email, password })
+      // Backend expects 'username' field (can be email)
+      const response = await authAPI.login({ username: email, password })
       return { success: true, data: response.data }
     } catch (error) {
       return {

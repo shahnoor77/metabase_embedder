@@ -1,11 +1,9 @@
 import { useState, useEffect } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
-import { BarChart3, Search, Plus, ExternalLink } from 'lucide-react'
+import { AnimatePresence } from 'framer-motion'
 import { workspaceAPI, dashboardAPI } from '../services/api'
 import Loading from '../components/Common/Loading'
 import DashboardCard from '../components/Dashboard/DashboardCard'
 import DashboardViewer from '../components/Dashboard/DashboardViewer'
-import Modal from '../components/Common/Modal'
 import toast from 'react-hot-toast'
 
 export default function DashboardsPage() {
@@ -47,7 +45,7 @@ export default function DashboardsPage() {
     try {
       // Now using the workspace ID in the path
       const response = await dashboardAPI.getAll(selectedWorkspace.id)
-      setWorkboards(response.data)
+      setDashboards(response.data)
     } catch (error) {
       toast.error('Failed to load dashboards')
     }
@@ -69,25 +67,6 @@ export default function DashboardsPage() {
     }
   }
 
-  const handleCreateDashboard = async (e) => {
-    e.preventDefault()
-    setCreating(true)
-    try {
-      await dashboardAPI.create({
-        workspace_id: selectedWorkspace.id,
-        name: newDashboard.name,
-      })
-      toast.success('Dashboard created successfully!')
-      setShowCreateModal(false)
-      setNewDashboard({ name: '' })
-      loadDashboards()
-    } catch (error) {
-      toast.error(error.response?.data?.detail || 'Failed to create dashboard')
-    } finally {
-      setCreating(false)
-    }
-  }
-
   const filteredDashboards = dashboards.filter((d) =>
     (d.metabase_dashboard_name || d.name || '').toLowerCase().includes(searchQuery.toLowerCase())
   )
@@ -97,13 +76,17 @@ export default function DashboardsPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold text-gray-900">Dashboards</h1>
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900">Dashboards</h1>
+          <p className="text-gray-600 mt-1">
+            Create dashboards in this workspace and view them here.
+          </p>
+        </div>
         <button
           onClick={() => setShowCreateModal(true)}
           className="btn-primary flex items-center space-x-2"
           disabled={!selectedWorkspace}
         >
-          <Plus className="w-5 h-5" />
           <span>New Dashboard</span>
         </button>
       </div>
@@ -133,21 +116,58 @@ export default function DashboardsPage() {
         )}
       </AnimatePresence>
 
-      <Modal isOpen={showCreateModal} onClose={() => setShowCreateModal(false)} title="Create Dashboard">
-        <form onSubmit={handleCreateDashboard} className="space-y-4">
-          <input
-            type="text"
-            className="input-field"
-            placeholder="Dashboard Name"
-            value={newDashboard.name}
-            onChange={(e) => setNewDashboard({ name: e.target.value })}
-            required
-          />
-          <button type="submit" className="w-full btn-primary" disabled={creating}>
-            {creating ? 'Creating...' : 'Create'}
-          </button>
-        </form>
-      </Modal>
+      {showCreateModal && (
+        <div className="card p-6 space-y-4">
+          <h3 className="text-lg font-semibold text-gray-900">Create Dashboard</h3>
+          <form
+            onSubmit={async (e) => {
+              e.preventDefault()
+              if (!selectedWorkspace) return
+              setCreating(true)
+              try {
+                await dashboardAPI.create({
+                  workspace_id: selectedWorkspace.id,
+                  name: newDashboard.name,
+                })
+                toast.success('Dashboard created successfully!')
+                setShowCreateModal(false)
+                setNewDashboard({ name: '' })
+                loadDashboards()
+              } catch (error) {
+                toast.error(error.response?.data?.detail || 'Failed to create dashboard')
+              } finally {
+                setCreating(false)
+              }
+            }}
+            className="space-y-4"
+          >
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Dashboard Name</label>
+              <input
+                type="text"
+                className="input-field"
+                placeholder="e.g., Sales Overview"
+                value={newDashboard.name}
+                onChange={(e) => setNewDashboard({ name: e.target.value })}
+                required
+              />
+            </div>
+            <div className="flex space-x-2">
+              <button
+                type="button"
+                className="btn-secondary flex-1"
+                onClick={() => setShowCreateModal(false)}
+                disabled={creating}
+              >
+                Cancel
+              </button>
+              <button type="submit" className="btn-primary flex-1" disabled={creating}>
+                {creating ? 'Creating...' : 'Create'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </div>
   )
 }

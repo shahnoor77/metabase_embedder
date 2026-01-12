@@ -11,8 +11,9 @@ logger = logging.getLogger(__name__)
 
 
 class MetabaseClient:
-    def __init__(self, base_url: str, admin_email: str, admin_password: str, embedding_secret: str):
-        self.base_url = base_url.rstrip("/")
+    def __init__(self, base_url: str, admin_email: str, admin_password: str, embedding_secret: str, public_url: str = None):
+        self.base_url = base_url.rstrip("/")  # Internal URL for API calls
+        self.public_url = (public_url or base_url).rstrip("/")  # Public URL for embed URLs (frontend accessible)
         self.admin_email = admin_email
         self.admin_password = admin_password
         self.embedding_secret = embedding_secret
@@ -184,17 +185,50 @@ class MetabaseClient:
             response.raise_for_status()
             return response.json()
 
+    async def get_collection(self, collection_id: int) -> Optional[Dict]:
+        """Gets collection details from Metabase."""
+        await self._get_session_token()
+        
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            try:
+                response = await client.get(
+                    f"{self.base_url}/api/collection/{collection_id}",
+                    headers=self._get_headers()
+                )
+                response.raise_for_status()
+                return response.json()
+            except Exception as e:
+                logger.error(f"Failed to get collection {collection_id}: {str(e)}")
+                return None
+
     async def enable_collection_embedding(self, collection_id: int):
         """Programmatically toggles 'Enable Embedding' for a collection."""
         await self._get_session_token()
         
         async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.put(
-                f"{self.base_url}/api/collection/{collection_id}",
-                json={"enable_embedding": True},
-                headers=self._get_headers()
-            )
-            return response.status_code == 200
+            try:
+                # First, verify the collection exists
+                collection = await self.get_collection(collection_id)
+                if not collection:
+                    logger.error(f"Collection {collection_id} not found")
+                    return False
+                
+                # Enable embedding
+                response = await client.put(
+                    f"{self.base_url}/api/collection/{collection_id}",
+                    json={"enable_embedding": True},
+                    headers=self._get_headers()
+                )
+                response.raise_for_status()
+                logger.info(f"Enabled embedding for collection {collection_id}")
+                return True
+            except Exception as e:
+                logger.error(f"Failed to enable collection embedding: {str(e)}")
+                return False
+    
+    async def ensure_collection_embedding(self, collection_id: int) -> bool:
+        """Ensures collection embedding is enabled. Returns True if successful."""
+        return await self.enable_collection_embedding(collection_id)
 
     async def get_collection_items(self, collection_id: int) -> list:
         """Fetches all items (dashboards, questions) inside a collection."""
@@ -359,20 +393,43 @@ class MetabaseClient:
         collection_id: int,
         permission: str = "write"
     ):
-        """Updates the permission graph for a collection."""
+        """Updates the permission graph safely by fetching current state first."""
         await self._get_session_token()
         
         async with httpx.AsyncClient(timeout=30.0) as client:
-            payload = {"groups": {str(group_id): {str(collection_id): permission}}}
+            # 1. GET the current graph
+            graph_resp = await client.get(
+                f"{self.base_url}/api/collection/graph", 
+                headers=self._get_headers()
+            )
+            graph = graph_resp.json()
+            
+            # 2. Update the specific group and collection
+            group_id_str = str(group_id)
+            coll_id_str = str(collection_id)
+            
+            if "groups" not in graph:
+                graph["groups"] = {}
+            if group_id_str not in graph["groups"]:
+                graph["groups"][group_id_str] = {}
+                
+            graph["groups"][group_id_str][coll_id_str] = permission
+            
+            # 3. PUT the full graph back
             response = await client.put(
-                f"{self.base_url}/api/collection/graph",
-                json=payload,
+                f"{self.base_url}/api/collection/graph", 
+                json=graph, 
                 headers=self._get_headers()
             )
             return response.status_code == 200
 
     async def add_user_to_group(self, user_id: int, group_id: int):
-        """Adds a Metabase user to a permission group."""
+        """Adds a Metabase user to a permission group (skips All Users group)."""
+        # Group 1 is 'All Users' which is handled automatically by Metabase
+        if int(group_id) == 1:
+            logger.info(f"Skipping membership for user {user_id} in 'All Users' group (automatic)")
+            return {"status": "skipped", "reason": "All Users group is automatic"}
+
         await self._get_session_token()
         
         payload = {"group_id": group_id, "user_id": user_id}
@@ -384,13 +441,65 @@ class MetabaseClient:
                 headers=self._get_headers()
             )
             
+            if response.status_code == 400 and "already a member" in response.text:
+                logger.info(f"User {user_id} is already in group {group_id}")
+                return {"status": "already_member"}
+
             if response.status_code >= 400:
-                logger.warning(f"Failed to add user to group: {response.text}")
+                logger.warning(f"Failed to add user to group: {response.status_code} - {response.text}")
+                return None
             
-            return response.json() if response.status_code < 400 else None
+            return response.json()
 
     # ==================== DASHBOARDS ====================
+    async def create_dashboard(self, name: str, collection_id: int) -> Dict:
+        """
+        Creates a new dashboard inside a specific collection.
+        
+        Args:
+            name: The display name of the dashboard
+            collection_id: The ID of the workspace collection
+        """
+        await self._get_session_token()
+        
+        payload = {
+            "name": name,
+            "collection_id": collection_id
+        }
+        
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                f"{self.base_url}/api/dashboard",
+                json=payload,
+                headers=self._get_headers()
+            )
+            
+            if response.status_code >= 400:
+                logger.error(f"Dashboard creation failed: {response.text}")
+                response.raise_for_status()
+                
+            dashboard_data = response.json()
+            
+            # CRITICAL: New dashboards need embedding enabled immediately 
+            # so the signed URLs work later.
+            await self.enable_resource_embedding(dashboard_data["id"], "dashboard")
+            
+            return dashboard_data
 
+    # Refine this method to handle both dashboards and collections dynamically
+    def get_resource_embed_url(self, resource_id: int, resource_type: str = "dashboard", filters: dict = None) -> str:
+        """Generates a signed JWT URL for a dashboard or collection."""
+        payload = {
+            "resource": {resource_type: resource_id},
+            "params": filters or {},
+            "exp": int(time.time()) + 3600
+        }
+        token = jwt.encode(payload, self.embedding_secret, algorithm="HS256")
+        
+        # Collections and Dashboards use slightly different URL paths
+        return f"/embed/{resource_type}/{token}#bordered=false&titled=false"
+    
+    
     async def list_dashboards(self, collection_id: Optional[int] = None) -> List[Dict]:
         """List dashboards, optionally filtered by collection."""
         await self._get_session_token()
@@ -410,11 +519,23 @@ class MetabaseClient:
             return data if isinstance(data, list) else data.get("data", [])
 
     async def enable_dashboard_embedding(self, dashboard_id: int) -> bool:
-        """Programmatically enables embedding for a specific dashboard."""
+        """
+        Programmatically enables embedding for a specific dashboard.
+        This is equivalent to clicking "Enable embedding" and "Publish" in Metabase UI.
+        """
         await self._get_session_token()
         
         async with httpx.AsyncClient(timeout=30.0) as client:
             try:
+                # First, get the dashboard to check its current state
+                get_response = await client.get(
+                    f"{self.base_url}/api/dashboard/{dashboard_id}",
+                    headers=self._get_headers()
+                )
+                get_response.raise_for_status()
+                dashboard_data = get_response.json()
+                
+                # Enable embedding
                 response = await client.put(
                     f"{self.base_url}/api/dashboard/{dashboard_id}",
                     json={"enable_embedding": True},
@@ -422,58 +543,107 @@ class MetabaseClient:
                 )
                 response.raise_for_status()
                 logger.info(f"Successfully enabled embedding for dashboard {dashboard_id}")
+                
+                # Note: In Metabase UI, after enabling embedding, you need to click "Publish"
+                # The API call above should handle this, but if issues persist, you may need
+                # to manually publish once in the Metabase UI
+                
                 return True
             except Exception as e:
                 logger.error(f"Failed to enable embedding for dashboard {dashboard_id}: {str(e)}")
                 return False
 
+    async def ensure_dashboard_embedding(self, dashboard_id: int) -> bool:
+        """
+        Idempotently enables embedding for a dashboard.
+        Safe to call before generating embed URLs to avoid requiring manual publish.
+        """
+        try:
+            return await self.enable_dashboard_embedding(dashboard_id)
+        except Exception as e:
+            logger.warning(f"ensure_dashboard_embedding failed for {dashboard_id}: {e}")
+            return False
+
     async def enable_resource_embedding(self, resource_id: int, resource_type: str = "dashboard") -> bool:
         """
-        Enable embedding for a dashboard or card (question).
-        
-        Args:
-            resource_id: Dashboard or card ID
-            resource_type: Either "dashboard" or "card"
-            
-        Returns:
-            True if successful, False otherwise
+        Enables embedding for a dashboard or card (question) idempotently.
         """
         await self._get_session_token()
         
         endpoint = "dashboard" if resource_type == "dashboard" else "card"
+        url = f"{self.base_url}/api/{endpoint}/{resource_id}"
         
         async with httpx.AsyncClient(timeout=30.0) as client:
             try:
+                # We update the resource to set enable_embedding to True
                 response = await client.put(
-                    f"{self.base_url}/api/{endpoint}/{resource_id}",
+                    url,
                     json={"enable_embedding": True},
                     headers=self._get_headers()
                 )
+                
+                if response.status_code == 404:
+                    logger.error(f"{resource_type.capitalize()} {resource_id} not found.")
+                    return False
+                    
                 response.raise_for_status()
-                logger.info(f"Enabled embedding for {resource_type} {resource_id}")
+                logger.info(f"Successfully enabled embedding for {resource_type} {resource_id}")
                 return True
-            except Exception as e:
-                logger.error(f"Failed to enable embedding for {resource_type} {resource_id}: {str(e)}")
+                
+            except httpx.HTTPStatusError as e:
+                logger.error(f"HTTP error enabling embedding for {resource_type}: {e.response.text}")
                 return False
-
+            except Exception as e:
+                logger.error(f"Unexpected error enabling embedding for {resource_type} {resource_id}: {str(e)}")
+                return False
     # ==================== EMBEDDING & URLS ====================
+    def get_dashboard_embed_url(self, dashboard_id: int, user_email: str, filters: dict = None) -> str:
+        """
+        Generates a signed JWT URL for a dashboard.
+        Fixes 'corrupt or manipulated' by including user_email for interactive sessions.
+        """
+        if not user_email:
+            raise ValueError("user_email is required for interactive dashboard embedding")
 
-    def get_dashboard_embed_url(self, dashboard_id: int, filters: dict = None) -> str:
-        """Generates a signed JWT URL with optional locked parameters."""
         payload = {
             "resource": {"dashboard": dashboard_id},
             "params": filters or {},
-            "exp": int(time.time()) + 3600
+            "exp": int(time.time()) + 3600, # 1 hour
+            "email": user_email
         }
-        token = jwt.encode(payload, self.embedding_secret, algorithm="HS256")
-        return f"/embed/dashboard/{token}#bordered=false&titled=false"
+        
+        try:
+            token = jwt.encode(payload, self.embedding_secret, algorithm="HS256")
+            # We use public_url here which should be the user-facing address of Metabase
+            path = f"/embed/dashboard/{token}#bordered=false&titled=false"
+            return f"{self.public_url.rstrip('/')}{path}"
+        except Exception as e:
+            logger.error(f"JWT Encoding failed for dashboard {dashboard_id}: {str(e)}")
+            raise
 
-    def get_embedded_collection_url(self, collection_id: int) -> str:
-        """Generates a signed JWT URL for the entire workspace collection."""
+    def get_embedded_collection_url(self, collection_id: int, user_email: str) -> str:
+        """
+        Generates a signed JWT URL for a collection (OSS Compatible).
+        Uses the direct /embed path since /auth/sso requires an Enterprise license.
+        """
+        if not user_email:
+            raise ValueError("user_email is required for interactive embedding")
+
         payload = {
             "resource": {"collection": collection_id},
             "params": {},
-            "exp": int(time.time()) + 3600
+            "exp": int(time.time()) + 3600,
+            "email": user_email
         }
-        token = jwt.encode(payload, self.embedding_secret, algorithm="HS256")
-        return f"/embed/collection/{token}#bordered=false&titled=true"
+        
+        try:
+            token = jwt.encode(payload, self.embedding_secret, algorithm="HS256")
+            
+            # OSS compatible path: /embed/collection/{token}
+            base_url = self.public_url.rstrip('/')
+            path = f"/embed/collection/{token}#bordered=false&titled=true"
+            
+            return f"{base_url}{path}"
+        except Exception as e:
+            logger.error(f"JWT Encoding failed for collection {collection_id}: {str(e)}")
+            raise
