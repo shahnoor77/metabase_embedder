@@ -54,9 +54,8 @@ const WorkspaceList = () => {
   const handleOpenWorkspace = async (workspace) => {
     const loadingToast = toast.loading('Generating secure session...');
     try {
-      // Fetch the most recent Metabase URL for this specific workspace
-      const response = await workspaceAPI.getById(workspace.id);
-      const url = response.data.metabase_url;
+      const response = await workspaceAPI.getEmbedUrl(workspace.id);
+      const url = response.data.url;
 
       if (url) {
         toast.dismiss(loadingToast);
@@ -66,7 +65,7 @@ const WorkspaceList = () => {
       }
     } catch (err) {
       toast.dismiss(loadingToast);
-      toast.error('Could not open Metabase: ' + err.message);
+      toast.error('Could not open Metabase: ' + (err.response?.data?.detail || err.message));
     }
   };
 

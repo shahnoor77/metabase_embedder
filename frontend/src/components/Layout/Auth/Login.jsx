@@ -15,7 +15,7 @@ export default function Login() {
   const handleSubmit = async (e) => {
     e.preventDefault()
     setLoading(true)
-
+    console.log('Attempting login with:',{email, password})
     const result = await login(email, password)
     
     if (result.success) {

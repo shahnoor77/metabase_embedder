@@ -16,10 +16,10 @@ export default function MetabaseOpener({ workspace, buttonText = "Open in Metaba
     try {
       // We call the backend to get the specific redirect or dashboard URL for this workspace
       // Using the workspaceAPI we established in api.js
-      const response = await workspaceAPI.getById(workspace.id)
-      
-      // If your backend returns a specific Metabase URL for the workspace
-      const metabaseUrl = response.data.metabase_url || response.data.external_link;
+      const response = await workspaceAPI.getEmbedUrl(workspace.id)
+
+      // Backend returns embed URL under `url`
+      const metabaseUrl = response.data.url || response.data.external_link;
 
       if (metabaseUrl) {
         toast.success('Redirecting to Metabase...')

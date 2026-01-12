@@ -71,7 +71,7 @@ services:
       MB_DB_USER: metabase_user
       MB_DB_PASS: metabase123
       MB_DB_HOST: postgres_metabase
-      MB_EMBEDDING_SECRET_KEY: metabase1231234433#$%*&YF^^^%FDR*(UJHGG>LLLL,jkj
+      METABASE_EMBEDDING_SECRET: 538117c5d03fdc1e30db1ea92c9593391eafe0d2a00cf7aa8b8d1e389b58e924
       MB_SITE_URL: http://localhost:3000
     ports:
       - "3000:3000"
@@ -100,7 +100,7 @@ services:
       METABASE_URL: http://metabase:3000
       METABASE_ADMIN_EMAIL: admin@metabase.local
       METABASE_ADMIN_PASSWORD: admin123@metabase*
-      METABASE_EMBEDDING_SECRET:  metabase1231234433#$%*&YF^^^%FDR*(UJHGG>LLLL,jkj
+      METABASE_EMBEDDING_SECRET: fd6eb8b6d28f4fc4c11cec6896c1942761b0cd7c20462d627cb3f6496cf90963 
       ANALYTICS_DB_HOST: postgres_analytics
       ANALYTICS_DB_PORT: 5432
       ANALYTICS_DB_NAME: analytics

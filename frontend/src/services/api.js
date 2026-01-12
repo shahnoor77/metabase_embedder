@@ -17,6 +17,7 @@ export const authAPI = {
   // Matches OpenAPI: /auth/signup and /auth/login
   register: (data) => api.post('/auth/signup', data),
   login: (credentials) => api.post('/auth/login', credentials),
+  getMe: () => api.get('/auth/me'),
 };
 
 export const workspaceAPI = {

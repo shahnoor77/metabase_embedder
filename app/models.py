@@ -53,8 +53,8 @@ class Workspace(Base):
     database_id = Column(Integer, nullable=True)  # Metabase database ID
     
     is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=True)
     
     # Relationships
     owner = relationship("User", back_populates="workspaces")
@@ -93,16 +93,10 @@ class Dashboard(Base):
     # Metabase dashboard reference
     metabase_dashboard_id = Column(Integer, nullable=False)
     metabase_dashboard_name = Column(String, nullable=False)
-    
-    # Dashboard metadata
-    description = Column(Text, nullable=True)
-    is_public = Column(Boolean, default=False)
-    
-    # Embedding configuration
-    embedding_params = Column(JSON, nullable=True)  # Store embedding parameters
-    
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    is_public = Column(Boolean, default=True, nullable=True)
+    resource_type = Column(String, default="dashboard", nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=True)
     
     # Relationships
     workspace = relationship("Workspace", back_populates="dashboards")

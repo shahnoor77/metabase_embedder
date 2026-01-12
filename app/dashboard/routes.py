@@ -26,7 +26,7 @@ class DashboardResponse(BaseModel):
 def check_workspace_access(user: User, workspace: Workspace):
     """Helper to check if user is owner or member of the workspace."""
     is_owner = workspace.owner_id == user.id
-    is_member = user in workspace.users
+    is_member = any(member.user_id == user.id for member in workspace.members)
     if not (is_owner or is_member):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

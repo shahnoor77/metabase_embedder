@@ -1,28 +1,56 @@
+"""
+Main FastAPI application entry point.
+Handles startup initialization, Metabase setup, and routing.
+"""
 import logging
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 import httpx
 
-from app.config import settings  # Ensure this matches your config import style
+from app.config import Settings
 from app.database import engine, SessionLocal
 from app.models import Base
 from app.metabase.client import MetabaseClient
-from app.metabase.sync import run_system_sync  # The new self-healing sync
 
 # Import routers
 from app.auth.routes import router as auth_router
-from app.workspace.routes import router as workspace_router
+from app.workspace.routes import router as workspace_router  
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
+
+# Load settings
+settings = Settings()
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 1. Local Database Tables Initialization
-    Base.metadata.create_all(bind=engine)
-
-    # 2. Metabase Initialization
+    """
+    Application lifespan manager.
+    Handles startup and shutdown operations.
+    """
+    logger.info("=" * 60)
+    logger.info("Starting Metabase Embedder Application")
+    logger.info("=" * 60)
+    
+    # ==================== STARTUP ====================
+    
+    # 1. Create database tables
+    try:
+        logger.info("Creating database tables...")
+        Base.metadata.create_all(bind=engine)
+        logger.info("✓ Database tables created successfully")
+    except Exception as e:
+        logger.error(f"✗ Failed to create database tables: {str(e)}")
+        raise
+    
+    # 2. Initialize Metabase client
     mb_client = MetabaseClient(
         base_url=settings.METABASE_URL,
         admin_email=settings.METABASE_ADMIN_EMAIL,
@@ -30,36 +58,65 @@ async def lifespan(app: FastAPI):
         embedding_secret=settings.METABASE_EMBEDDING_SECRET
     )
     
-    if await mb_client.check_health():
-        logger.info("Metabase online. Starting initialization...")
+    # 3. Check Metabase health
+    logger.info("Checking Metabase health...")
+    is_healthy = await mb_client.check_health()
+    
+    if not is_healthy:
+        logger.warning("⚠ Metabase is not responding yet. It may still be starting up.")
+        logger.warning("⚠ The application will continue, but Metabase features may not work immediately.")
+    else:
+        logger.info("✓ Metabase is healthy and responding")
         
-        # Handle First-Run Setup (Provision Admin)
-        setup_token = await mb_client.get_setup_token()
-        if setup_token:
-            logger.info("Fresh Metabase instance detected. Provisioning Admin...")
-            try:
-                await mb_client.setup_admin(setup_token)
-                logger.info("Admin setup completed successfully.")
-            except httpx.HTTPStatusError as e:
-                if e.response.status_code == 403:
-                    logger.info("Admin already exists. Skipping initial setup.")
-                else:
-                    logger.error(f"Setup error: {e.response.text}")
-        
-        # Always run global settings (Enable Embedding globally)
-        await mb_client.setup_metabase()
-
-        # 3. Connect Analytics Database to Metabase
+        # 4. Handle first-time setup
         try:
+            setup_token = await mb_client.get_setup_token()
+            
+            if setup_token:
+                logger.info("Fresh Metabase instance detected. Running initial setup...")
+                
+                try:
+                    await mb_client.setup_admin(setup_token)
+                    logger.info("✓ Admin user created successfully")
+                except httpx.HTTPStatusError as e:
+                    if e.response.status_code == 403:
+                        logger.info("✓ Admin already exists, skipping setup")
+                    else:
+                        logger.error(f"✗ Setup error: {e.response.text}")
+                        raise
+            else:
+                logger.info("✓ Metabase is already configured")
+                
+        except Exception as e:
+            logger.error(f"✗ Error during Metabase setup: {str(e)}")
+        
+        # 5. Enable global embedding settings
+        try:
+            logger.info("Enabling Metabase embedding...")
+            await mb_client.setup_metabase()
+            logger.info("✓ Metabase embedding enabled")
+        except Exception as e:
+            logger.error(f"✗ Failed to enable embedding: {str(e)}")
+        
+        # 6. Connect Analytics Database to Metabase
+        try:
+            logger.info("Checking Analytics Database connection...")
             databases = await mb_client.list_databases()
-            analytics_db = next(
-                (db for db in databases if isinstance(db, dict) and db.get('name') == 'Analytics Database'),
-                None
-            )
+            
+            # Look for Analytics Database (support multiple names)
+            analytics_db = None
+            for db_item in databases:
+                if isinstance(db_item, dict):
+                    db_name = db_item.get('name', '')
+                    if db_name in ['Analytics Database', 'Analytics']:
+                        analytics_db = db_item
+                        break
             
             db_id = None
+            
             if not analytics_db:
-                logger.info("Connecting Metabase to the Analytics Container...")
+                logger.info("Analytics Database not found. Adding it to Metabase...")
+                
                 db_result = await mb_client.add_database(
                     name="Analytics Database",
                     engine="postgres",
@@ -69,51 +126,170 @@ async def lifespan(app: FastAPI):
                     user=settings.ANALYTICS_DB_USER,
                     password=settings.ANALYTICS_DB_PASSWORD
                 )
+                
                 if db_result:
                     db_id = db_result.get('id')
+                    logger.info(f"✓ Analytics Database added (ID: {db_id})")
+                else:
+                    logger.error("✗ Failed to add Analytics Database")
             else:
                 db_id = analytics_db.get('id')
-
-            if db_id:
-                group_id = await mb_client.get_all_users_group_id()
-                await mb_client.set_database_permissions(group_id, db_id, "public", "all")
-                logger.info(f"Analytics Database (ID: {db_id}) connected and verified.")
-        except Exception as e:
-            logger.error(f"Failed to provision Analytics DB: {e}")
-
-        # 4. RUN SELF-HEALING SYNC
-        # This fixes 404/Not Found errors for collections and imports dashboards
-        db = SessionLocal()
-        try:
-            logger.info("Running autonomous Metabase sync...")
-            await run_system_sync(db, mb_client)
-            logger.info("Sync completed successfully.")
-        except Exception as sync_err:
-            logger.error(f"Lifespan Sync Error: {sync_err}")
-        finally:
-            db.close()
+                logger.info(f"✓ Analytics Database already exists (ID: {db_id})")
             
+            # 7. Set default permissions for "All Users" group
+            if db_id:
+                try:
+                    logger.info("Setting default database permissions for All Users group...")
+                    
+                    all_users_group_id = await mb_client.get_all_users_group_id()
+                    
+                    await mb_client.set_database_permissions(
+                        group_id=all_users_group_id,
+                        database_id=db_id,
+                        schema_name="public",
+                        permission="all"
+                    )
+                    
+                    logger.info(f"✓ Database permissions set for All Users (Group ID: {all_users_group_id})")
+                    
+                except Exception as perm_err:
+                    logger.error(f"✗ Failed to set database permissions: {str(perm_err)}")
+            
+        except Exception as db_err:
+            logger.error(f"✗ Failed to configure Analytics Database: {str(db_err)}")
+    
+    logger.info("=" * 60)
+    logger.info("Application startup complete!")
+    logger.info("=" * 60)
+    
+    # Application is now running
     yield
+    
+    # ==================== SHUTDOWN ====================
+    logger.info("Shutting down application...")
+    logger.info("Goodbye!")
 
-app = FastAPI(title="Metabase Embedder API", lifespan=lifespan)
 
-# CORS Middleware
+# Create FastAPI application
+app = FastAPI(
+    title="Metabase Embedder API",
+    description="API for managing Metabase workspaces with embedded analytics",
+    version="1.0.0",
+    lifespan=lifespan
+)
+
+
+# ==================== CORS Configuration ====================
+
+# IMPORTANT: Update these origins for production!
+# Don't use ["*"] in production - it's a security risk
+CORS_ORIGINS = [
+    "http://localhost:3001",  # Frontend dev server
+    "http://localhost:3000",  # Alternative frontend port
+    "http://localhost:5173",  # Vite dev server
+]
+
+# Add production origins if specified
+if hasattr(settings, 'FRONTEND_URL') and settings.FRONTEND_URL:
+    CORS_ORIGINS.append(settings.FRONTEND_URL)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=CORS_ORIGINS,  # Specific origins only!
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Standardize Prefixing
-# Note: workspace_router already has /api/workspaces, auth usually has /auth.
-# Make sure your imports inside routers match these paths.
-app.include_router(auth_router)
-app.include_router(workspace_router)  # Prefix is already in the router file
-# Standardize Prefixing in main.py
 
+# ==================== Exception Handlers ====================
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request, exc):
+    """Handle HTTP exceptions with consistent format."""
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "error": exc.detail,
+            "status_code": exc.status_code
+        }
+    )
+
+
+@app.exception_handler(Exception)
+async def general_exception_handler(request, exc):
+    """Handle unexpected exceptions."""
+    logger.error(f"Unhandled exception: {str(exc)}", exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": "Internal server error",
+            "status_code": 500
+        }
+    )
+
+
+# ==================== Include Routers ====================
+
+# Both routers already have their prefixes defined:
+# - auth_router has prefix="/api/auth"
+# - workspace_router has prefix="/api/workspaces"
+app.include_router(auth_router)
+app.include_router(workspace_router)
+
+
+# ==================== Root Endpoints ====================
 
 @app.get("/")
 async def root():
-    return {"status": "ok", "message": "Metabase Embedder API is running"}
+    """Root endpoint - API status."""
+    return {
+        "status": "ok",
+        "message": "Metabase Embedder API is running",
+        "version": "1.0.0",
+        "docs": "/docs"
+    }
+
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint."""
+    return {
+        "status": "healthy",
+        "service": "metabase-embedder-api"
+    }
+
+
+@app.get("/api")
+async def api_info():
+    """API information endpoint."""
+    return {
+        "name": "Metabase Embedder API",
+        "version": "1.0.0",
+        "endpoints": {
+            "auth": "/api/auth",
+            "workspaces": "/api/workspaces",
+            "docs": "/docs",
+            "health": "/health"
+        }
+    }
+
+
+# ==================== Development Info ====================
+
+if __name__ == "__main__":
+    import uvicorn
+    
+    logger.info("Starting development server...")
+    logger.info("=" * 60)
+    logger.info("API will be available at: http://localhost:8000")
+    logger.info("API documentation: http://localhost:8000/docs")
+    logger.info("=" * 60)
+    
+    uvicorn.run(
+        "app.main:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=True,
+        log_level="info"
+    )

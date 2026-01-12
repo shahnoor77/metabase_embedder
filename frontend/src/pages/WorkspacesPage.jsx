@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Briefcase, Plus, Search, Grid, List } from 'lucide-react'
 import { workspaceAPI } from '../services/api'
-import { metabaseService } from '../services/metabase'
 import Loading from '../components/Common/Loading'
 import Modal from '../components/Common/Modal'
 import WorkspaceCard from '../components/Workspace/WorkspaceCard'
@@ -247,15 +246,16 @@ function WorkspaceListItem({ workspace }) {
   const handleOpen = async () => {
     setLoading(true)
     try {
-      const urlResult = await metabaseService.getWorkspaceUrl(workspace.id, user.token)
-      if (urlResult.success) {
-        metabaseService.openMetabaseWorkspace(urlResult.data.url)
+      const response = await workspaceAPI.getEmbedUrl(workspace.id)
+      const url = response.data.url
+      if (url) {
+        window.open(url, '_blank', 'noopener,noreferrer')
         toast.success('Opening Metabase...')
       } else {
-        toast.error(urlResult.error)
+        toast.error('No embed URL returned')
       }
     } catch (error) {
-      toast.error('Failed to open workspace')
+      toast.error(error.response?.data?.detail || 'Failed to open workspace')
     } finally {
       setLoading(false)
     }

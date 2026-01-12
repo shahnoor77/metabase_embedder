@@ -27,9 +27,8 @@ export default function WorkspaceCard({ workspace, index }) {
     setLoading(true)
 
     try {
-      // Get the workspace details which includes its specific Metabase URL
-      const response = await workspaceAPI.getById(workspace.id)
-      const url = response.data.metabase_url || response.data.external_link
+      const response = await workspaceAPI.getEmbedUrl(workspace.id)
+      const url = response.data.url || response.data.external_link
 
       if (url) {
         toast.success('Redirecting to Metabase...')
@@ -38,7 +37,7 @@ export default function WorkspaceCard({ workspace, index }) {
         toast.error('Metabase is not yet configured for this workspace')
       }
     } catch (error) {
-      toast.error('Failed to retrieve Metabase session')
+      toast.error(error.response?.data?.detail || 'Failed to retrieve Metabase session')
     } finally {
       setLoading(false)
     }
