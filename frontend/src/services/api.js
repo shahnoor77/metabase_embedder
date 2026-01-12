@@ -1,7 +1,6 @@
 import axios from 'axios';
 
 const api = axios.create({
-  // Point to the root of your backend (no /api suffix here)
   baseURL: import.meta.env.VITE_API_URL || 'http://localhost:8000',
 });
 
@@ -16,40 +15,36 @@ api.interceptors.request.use((config) => {
 });
 
 export const authAPI = {
-  // Matches OpenAPI: /api/auth/*
   register: (data) => api.post(`${API_PREFIX}/auth/signup`, data),
-  // Login uses form-urlencoded format with username and password
   login: (credentials) => {
     const formData = new URLSearchParams();
-    formData.append('username', credentials.username || credentials.email); // Support both
+    formData.append('username', credentials.username || credentials.email);
     formData.append('password', credentials.password);
     formData.append('grant_type', 'password');
     return api.post(`${API_PREFIX}/auth/login`, formData, {
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     });
   },
-  refresh: () => api.post(`${API_PREFIX}/auth/refresh`),
   getMe: () => api.get(`${API_PREFIX}/auth/me`),
 };
 
 export const workspaceAPI = {
-  // Matches OpenAPI: /api/workspaces
   getAll: () => api.get(`${API_PREFIX}/workspaces`),
   getById: (id) => api.get(`${API_PREFIX}/workspaces/${id}`),
   create: (data) => api.post(`${API_PREFIX}/workspaces`, data),
   
-  // Matches OpenAPI: /api/workspaces/{id}/embed
+  // Gets the JWT-signed URL for the entire collection (Interactive Embedding)
   getEmbedUrl: (id) => api.get(`${API_PREFIX}/workspaces/${id}/embed`),
+
+  // NEW: Gets the SSO Magic Link to open the Metabase Creator/Designer
+  getPortalUrl: (id) => api.get(`${API_PREFIX}/workspaces/${id}/creator-url`),
 };
 
 export const dashboardAPI = {
-  // Matches OpenAPI: /api/workspaces/{id}/dashboards
+  // Triggers the Backend Auto-Sync and returns the dashboard list
   getAll: (workspaceId) => api.get(`${API_PREFIX}/workspaces/${workspaceId}/dashboards`),
-  create: (data) => api.post(`${API_PREFIX}/dashboard`, data),
   
-  // Matches OpenAPI: /api/workspaces/dashboards/{id}/embed
+  // Gets the JWT-signed URL for a specific dashboard
   getEmbedUrl: (id) => api.get(`${API_PREFIX}/workspaces/dashboards/${id}/embed`),
 };
 

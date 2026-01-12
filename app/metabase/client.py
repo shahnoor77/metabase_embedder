@@ -608,7 +608,7 @@ class MetabaseClient:
         payload = {
             "resource": {"dashboard": dashboard_id},
             "params": filters or {},
-            "exp": int(time.time()) + 3600, # 1 hour
+            "exp": int(time.time()) + (60*60*24), 
             "email": user_email
         }
         
@@ -647,3 +647,5 @@ class MetabaseClient:
         except Exception as e:
             logger.error(f"JWT Encoding failed for collection {collection_id}: {str(e)}")
             raise
+
+    

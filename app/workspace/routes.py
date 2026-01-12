@@ -561,3 +561,4 @@ async def get_workspace_collection_url(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Could not generate secure embedding link."
         )
+        
