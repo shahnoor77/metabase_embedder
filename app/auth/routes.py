@@ -4,7 +4,7 @@ Reliable version with Python 3.12 compatibility and Metabase integration.
 """
 import logging
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 import bcrypt
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
@@ -15,6 +15,9 @@ from pydantic import BaseModel
 from app.database import get_db
 from app.models import User
 from app.config import Settings
+
+if TYPE_CHECKING:
+    from app.metabase.client import MetabaseClient
 
 router = APIRouter(prefix="/api/auth", tags=["authentication"])
 logger = logging.getLogger(__name__)
@@ -131,7 +134,7 @@ async def get_current_user(
     return user
 
 
-def get_metabase_client():
+def get_metabase_client() -> "MetabaseClient":
     """Get Metabase client instance."""
     from app.metabase.client import MetabaseClient
     
@@ -212,6 +215,7 @@ async def signup(user_data: UserSignup, db: Session = Depends(get_db)):
         logger.error(f"Metabase sync failed: {str(e)}")
     
     # 4. Auto-assign to default workspace
+    mb_client = get_metabase_client()
     await assign_user_to_default_workspace(new_user, db, mb_client)
     
     return new_user
@@ -283,7 +287,7 @@ async def login(
 async def assign_user_to_default_workspace(
     user: User,
     db: Session,
-    mb_client: MetabaseClient
+    mb_client: "MetabaseClient"
 ):
     """
     Auto-assign user to default workspace.

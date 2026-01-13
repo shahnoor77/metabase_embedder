@@ -1,9 +1,10 @@
 import { motion } from 'framer-motion'
 import { User, Lock, Bell, Database, HelpCircle } from 'lucide-react'
-import { useAuth } from '../context/AuthContext'
+import { useContext } from 'react'
+import { AuthContext } from '../context/AuthContext'
 
 export default function SettingsPage() {
-  const { user } = useAuth()
+  const { user } = useContext(AuthContext)
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
