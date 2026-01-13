@@ -17,6 +17,7 @@ from app.metabase.client import MetabaseClient
 # Import routers
 from app.auth.routes import router as auth_router
 from app.workspace.routes import router as workspace_router  
+from app.dashboard.routes import router as dashboard_router  # ADD THIS
 
 # Configure logging
 logging.basicConfig(
@@ -116,11 +117,11 @@ async def lifespan(app: FastAPI):
             db_id = None
             
             if not analytics_db:
-                logger.info("Analytics Database not found. Adding it to Metabase...")
+                logger.info("Analytics Database not found. Adding external SQL Server to Metabase...")
                 
                 db_result = await mb_client.add_database(
                     name="Analytics Database",
-                    engine="postgres",
+                    engine="sqlserver",  # ← SQL Server engine
                     host=settings.ANALYTICS_DB_HOST,
                     port=settings.ANALYTICS_DB_PORT,
                     dbname=settings.ANALYTICS_DB_NAME,
@@ -130,7 +131,7 @@ async def lifespan(app: FastAPI):
                 
                 if db_result:
                     db_id = db_result.get('id')
-                    logger.info(f"✓ Analytics Database added (ID: {db_id})")
+                    logger.info(f"✓ SQL Server Analytics Database added (ID: {db_id})")
                 else:
                     logger.error("✗ Failed to add Analytics Database")
             else:
@@ -147,7 +148,7 @@ async def lifespan(app: FastAPI):
                     await mb_client.set_database_permissions(
                         group_id=all_users_group_id,
                         database_id=db_id,
-                        schema_name="public",
+                        schema_name="dbo",  # SQL Server uses 'dbo' schema, not 'public'
                         permission="all"
                     )
                     
@@ -235,8 +236,10 @@ async def general_exception_handler(request, exc):
 # Both routers already have their prefixes defined:
 # - auth_router has prefix="/api/auth"
 # - workspace_router has prefix="/api/workspaces"
+# - dashboard_router has prefix="/api/dashboards"
 app.include_router(auth_router)
 app.include_router(workspace_router)
+app.include_router(dashboard_router)  # ADD THIS
 
 
 # ==================== Root Endpoints ====================

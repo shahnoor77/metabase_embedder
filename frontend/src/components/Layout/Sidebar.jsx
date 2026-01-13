@@ -5,7 +5,7 @@ import { motion } from 'framer-motion'
 const navItems = [
   { path: '/', icon: Home, label: 'Home' },
   { path: '/workspaces', icon: Briefcase, label: 'Workspaces' },
-  { path: '/dashboards', icon: BarChart3, label: 'Dashboards' },
+  { path: '/dashboards', icon: BarChart3, label: 'Your Dashboards' },
   { path: '/create', icon: Plus, label: 'Create New' },
   { path: '/settings', icon: Settings, label: 'Settings' },
 ]
@@ -20,7 +20,7 @@ export default function Sidebar() {
             to={item.path}
             end={item.path === '/'}
             className={({ isActive }) =>
-              `flex items-center space-x-3 px-4 py-3 rounded-lg transition-all ${
+              `flex items-center space-x-3 px-4 py-3 rounded-lg transition-all relative ${
                 isActive
                   ? 'bg-primary-50 text-primary-700'
                   : 'text-gray-700 hover:bg-gray-100'
@@ -45,12 +45,12 @@ export default function Sidebar() {
 
       <div className="p-4 mt-8">
         <div className="bg-gradient-to-br from-primary-500 to-primary-700 rounded-xl p-6 text-white">
-          <h3 className="font-bold mb-2">Need Help?</h3>
+          <h3 className="font-bold mb-2">Dashboard Tip</h3>
           <p className="text-sm text-primary-100 mb-4">
-            Check our documentation and tutorials
+            Create dashboards and edit them directly from Metabase
           </p>
           <button className="w-full bg-white text-primary-600 px-4 py-2 rounded-lg font-medium hover:bg-primary-50 transition-colors">
-            View Docs
+            Learn More
           </button>
         </div>
       </div>

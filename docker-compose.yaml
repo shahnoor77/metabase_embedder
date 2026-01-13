@@ -6,38 +6,17 @@ services:
     image: postgres:15-alpine
     container_name: metabase_app_postgres
     environment:
-      POSTGRES_DB: metabase_app
-      POSTGRES_USER: app_user
-      POSTGRES_PASSWORD: app123
+      POSTGRES_DB: ${APP_DB_NAME:-metabase_app}
+      POSTGRES_USER: ${APP_DB_USER:-app_user}
+      POSTGRES_PASSWORD: ${APP_DB_PASSWORD:-app123}
     volumes:
       - postgres_app_data:/var/lib/postgresql/data
     networks:
       - metabase_network
     ports:
-      - "5432:5432"
+      - "${APP_DB_PORT:-5432}:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U app_user -d metabase_app"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  # PostgreSQL for analytics/sample data that users will query
-  postgres_analytics:
-    image: postgres:15-alpine
-    container_name: metabase_analytics_postgres
-    environment:
-      POSTGRES_DB: analytics
-      POSTGRES_USER: analytics_user
-      POSTGRES_PASSWORD: analytics123
-    volumes:
-      - postgres_analytics_data:/var/lib/postgresql/data
-      - ./init-analytics.sql:/docker-entrypoint-initdb.d/init.sql
-    networks:
-      - metabase_network
-    ports:
-      - "5433:5432"
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U analytics_user -d analytics"]
+      test: ["CMD-SHELL", "pg_isready -U ${APP_DB_USER:-app_user} -d ${APP_DB_NAME:-metabase_app}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -47,15 +26,15 @@ services:
     image: postgres:15-alpine
     container_name: metabase_postgres
     environment:
-      POSTGRES_DB: metabase
-      POSTGRES_USER: metabase_user
-      POSTGRES_PASSWORD: metabase123
+      POSTGRES_DB: ${METABASE_DB_NAME:-metabase}
+      POSTGRES_USER: ${METABASE_DB_USER:-metabase_user}
+      POSTGRES_PASSWORD: ${METABASE_DB_PASSWORD:-metabase123}
     volumes:
       - postgres_metabase_data:/var/lib/postgresql/data
     networks:
       - metabase_network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U metabase_user -d metabase"]
+      test: ["CMD-SHELL", "pg_isready -U ${METABASE_DB_USER:-metabase_user} -d ${METABASE_DB_NAME:-metabase}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -66,15 +45,15 @@ services:
     container_name: metabase
     environment:
       MB_DB_TYPE: postgres
-      MB_DB_DBNAME: metabase
+      MB_DB_DBNAME: ${METABASE_DB_NAME:-metabase}
       MB_DB_PORT: 5432
-      MB_DB_USER: metabase_user
-      MB_DB_PASS: metabase123
+      MB_DB_USER: ${METABASE_DB_USER:-metabase_user}
+      MB_DB_PASS: ${METABASE_DB_PASSWORD:-metabase123}
       MB_DB_HOST: postgres_metabase
-      METABASE_EMBEDDING_SECRET: d5b90399855d9ada872b285d0b65d52b60d6414d9eb5859db5f61e5e34a12772
-      MB_SITE_URL: http://localhost:3000
+      METABASE_EMBEDDING_SECRET: ${METABASE_EMBEDDING_SECRET:-d5b90399855d9ada872b285d0b65d52b60d6414d9eb5859db5f61e5e34a12772}
+      MB_SITE_URL: ${METABASE_PUBLIC_URL:-http://localhost:3000}
     ports:
-      - "3000:3000"
+      - "${METABASE_PORT:-3000}:3000"
     networks:
       - metabase_network
     depends_on:
@@ -96,22 +75,22 @@ services:
       dockerfile: Dockerfile
     container_name: metabase_backend
     environment:
-      DATABASE_URL: postgresql://app_user:app123@postgres_app:5432/metabase_app
+      DATABASE_URL: postgresql://${APP_DB_USER:-app_user}:${APP_DB_PASSWORD:-app123}@postgres_app:5432/${APP_DB_NAME:-metabase_app}
       METABASE_URL: http://metabase:3000
-      METABASE_PUBLIC_URL: http://localhost:3000
-      METABASE_ADMIN_EMAIL: admin@metabase.local
-      METABASE_ADMIN_PASSWORD: admin123@metabase*
-      METABASE_EMBEDDING_SECRET: d5b90399855d9ada872b285d0b65d52b60d6414d9eb5859db5f61e5e34a12772 
-      ANALYTICS_DB_HOST: postgres_analytics
-      ANALYTICS_DB_PORT: 5432
-      ANALYTICS_DB_NAME: analytics
-      ANALYTICS_DB_USER: analytics_user
-      ANALYTICS_DB_PASSWORD: analytics123
-      JWT_SECRET: yourjwttockentouseinapplication334445566
-      JWT_ALGORITHM: HS256
-      ACCESS_TOKEN_EXPIRE_MINUTES: 30
+      METABASE_PUBLIC_URL: ${METABASE_PUBLIC_URL:-http://localhost:3000}
+      METABASE_ADMIN_EMAIL: ${METABASE_ADMIN_EMAIL:-admin@metabase.local}
+      METABASE_ADMIN_PASSWORD: ${METABASE_ADMIN_PASSWORD:-admin123@metabase*}
+      METABASE_EMBEDDING_SECRET: ${METABASE_EMBEDDING_SECRET:-d5b90399855d9ada872b285d0b65d52b60d6414d9eb5859db5f61e5e34a12772}
+      ANALYTICS_DB_HOST: ${ANALYTICS_DB_HOST}
+      ANALYTICS_DB_PORT: ${ANALYTICS_DB_PORT:-1433}
+      ANALYTICS_DB_NAME: ${ANALYTICS_DB_NAME}
+      ANALYTICS_DB_USER: ${ANALYTICS_DB_USER}
+      ANALYTICS_DB_PASSWORD: ${ANALYTICS_DB_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET:-your-super-secret-jwt-key-change-this-in-production}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
     ports:
-      - "8000:8000"
+      - "${BACKEND_PORT:-8000}:8000"
     networks:
       - metabase_network
     depends_on:
@@ -125,33 +104,28 @@ services:
     command: >
       sh -c "
         echo 'Waiting for services to be ready...' &&
-        sleep 10 &&
+        sleep 15 &&
         alembic upgrade head &&
         uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
       "
 
-  # Frontend
-  
-  # ===============================
   # Frontend (React/Vite)
-  # ===============================
   frontend:
     build:
       context: .
       dockerfile: Dockerfile.frontend
     container_name: react-frontend
     environment:
-      - VITE_API_URL=http://localhost:8000
+      VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
     ports:
-      - "5173:5173"
+      - "${FRONTEND_PORT:-5173}:5173"
     depends_on:
       - backend
     networks:
       - metabase_network
     volumes:
       - ./frontend:/app
-      - /app/node_modules # Important to keep container node_modules
-
+      - /app/node_modules
 
 networks:
   metabase_network:
@@ -159,6 +133,5 @@ networks:
 
 volumes:
   postgres_app_data:
-  postgres_analytics_data:
   postgres_metabase_data:
   metabase_data:

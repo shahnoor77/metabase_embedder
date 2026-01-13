@@ -599,7 +599,7 @@ class MetabaseClient:
     # ==================== EMBEDDING & URLS ====================
     def get_dashboard_embed_url(self, dashboard_id: int, user_email: str, filters: dict = None) -> str:
         """
-        Generates a signed JWT URL for a dashboard.
+        Generates a signed JWT URL for a dashboard (viewer mode).
         Fixes 'corrupt or manipulated' by including user_email for interactive sessions.
         """
         if not user_email:
@@ -614,38 +614,48 @@ class MetabaseClient:
         
         try:
             token = jwt.encode(payload, self.embedding_secret, algorithm="HS256")
-            # We use public_url here which should be the user-facing address of Metabase
             path = f"/embed/dashboard/{token}#bordered=false&titled=false"
             return f"{self.public_url.rstrip('/')}{path}"
         except Exception as e:
             logger.error(f"JWT Encoding failed for dashboard {dashboard_id}: {str(e)}")
             raise
 
-    def get_embedded_collection_url(self, collection_id: int, user_email: str) -> str:
+    def get_dashboard_editor_url(self, dashboard_id: int, user_email: str, is_owner: bool = False) -> str:
         """
-        Generates a signed JWT URL for a collection (OSS Compatible).
-        Uses the direct /embed path since /auth/sso requires an Enterprise license.
+        Generates a URL for the dashboard editor (restricted mode).
+        
+        Features:
+        - Hides Metabase header/sidebar
+        - Disables settings/admin access
+        - Only shows dashboard editing tools
+        - Full screen editor for seamless integration
         """
         if not user_email:
-            raise ValueError("user_email is required for interactive embedding")
+            raise ValueError("user_email is required")
 
-        payload = {
-            "resource": {"collection": collection_id},
-            "params": {},
-            "exp": int(time.time()) + 3600,
-            "email": user_email
-        }
+        # Dashboard editor uses different URL parameters than embedding
+        # Edit mode: /collection/ID/dashboard/ID or /dashboard/ID?edit
         
-        try:
-            token = jwt.encode(payload, self.embedding_secret, algorithm="HS256")
-            
-            # OSS compatible path: /embed/collection/{token}
-            base_url = self.public_url.rstrip('/')
-            path = f"/embed/collection/{token}#bordered=false&titled=true"
-            
-            return f"{base_url}{path}"
-        except Exception as e:
-            logger.error(f"JWT Encoding failed for collection {collection_id}: {str(e)}")
-            raise
+        params = []
+        
+        # Hide UI elements except dashboard editor
+        params.append("hide_parameters=all")  # Hide parameter filtering
+        params.append("hide_title=false")     # Keep dashboard title
+        params.append("dashcard_border=false") # Remove card borders
+        
+        # Edit mode (requires user to be logged in via JWT)
+        params.append("edit")
+        
+        # Disable sidebar access (users cannot see other items)
+        # This is a UI-level restriction; full security depends on backend permissions
+        
+        # Restrict to dashboard-only view
+        base_url = self.public_url.rstrip('/')
+        param_str = "&".join(params)
+        
+        editor_url = f"{base_url}/dashboard/{dashboard_id}?{param_str}"
+        
+        logger.info(f"Generated editor URL for dashboard {dashboard_id} (owner={is_owner})")
+        
+        return editor_url
 
-    

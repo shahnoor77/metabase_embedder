@@ -2,7 +2,7 @@
 Database models for the application.
 """
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Boolean, Text, JSON
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Boolean, Text, JSON, UniqueConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy.ext.declarative import declarative_base
 
@@ -22,6 +22,9 @@ class User(Base):
     # Metabase integration - stores the Metabase user ID
     metabase_user_id = Column(Integer, nullable=True)
     
+    # Track if user has been assigned to default workspace
+    default_workspace_assigned = Column(Boolean, default=False)
+    
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -29,6 +32,7 @@ class User(Base):
     # Relationships
     workspaces = relationship("Workspace", back_populates="owner", cascade="all, delete-orphan")
     workspace_members = relationship("WorkspaceMember", back_populates="user", cascade="all, delete-orphan")
+    user_dashboards = relationship("UserDashboard", back_populates="user", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<User(id={self.id}, email={self.email}, metabase_user_id={self.metabase_user_id})>"
@@ -51,6 +55,9 @@ class Workspace(Base):
     
     # Database connection for this workspace
     database_id = Column(Integer, nullable=True)  # Metabase database ID
+    
+    # Flag to identify default workspace
+    is_default = Column(Boolean, default=False)
     
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=True)
@@ -91,18 +98,49 @@ class Dashboard(Base):
     workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=False)
     
     # Metabase dashboard reference
-    metabase_dashboard_id = Column(Integer, nullable=False)
+    metabase_dashboard_id = Column(Integer, nullable=False, unique=True)
     metabase_dashboard_name = Column(String, nullable=False)
+    description = Column(Text, nullable=True)
+    
     is_public = Column(Boolean, default=True, nullable=True)
     resource_type = Column(String, default="dashboard", nullable=True)
+    
+    # Dashboard status
+    is_published = Column(Boolean, default=False)
+    
     created_at = Column(DateTime, default=datetime.utcnow, nullable=True)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=True)
     
     # Relationships
     workspace = relationship("Workspace", back_populates="dashboards")
+    user_dashboards = relationship("UserDashboard", back_populates="dashboard", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<Dashboard(id={self.id}, name={self.metabase_dashboard_name}, workspace_id={self.workspace_id})>"
+
+
+class UserDashboard(Base):
+    """UserDashboard model - tracks user ownership and access to dashboards."""
+    __tablename__ = "user_dashboards"
+    __table_args__ = (UniqueConstraint('user_id', 'dashboard_id', name='uq_user_dashboard'),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    dashboard_id = Column(Integer, ForeignKey("dashboards.id"), nullable=False)
+    
+    # User's dashboard metadata
+    is_owner = Column(Boolean, default=False)  # User created this dashboard
+    is_pinned = Column(Boolean, default=False)  # User favorited it
+    
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    user = relationship("User", back_populates="user_dashboards")
+    dashboard = relationship("Dashboard", back_populates="user_dashboards")
+
+    def __repr__(self):
+        return f"<UserDashboard(user_id={self.user_id}, dashboard_id={self.dashboard_id}, is_owner={self.is_owner})>"
 
 
 class MetabaseSession(Base):

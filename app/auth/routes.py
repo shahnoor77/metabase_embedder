@@ -151,6 +151,7 @@ async def signup(user_data: UserSignup, db: Session = Depends(get_db)):
     """
     Register a new user.
     Creates both app user AND Metabase user (as regular user, not admin).
+    Auto-assigns user to default workspace.
     """
     # 1. Check if user exists
     existing_user = db.query(User).filter(User.email == user_data.email).first()
@@ -209,8 +210,9 @@ async def signup(user_data: UserSignup, db: Session = Depends(get_db)):
     
     except Exception as e:
         logger.error(f"Metabase sync failed: {str(e)}")
-        # Don't fail signup if Metabase user creation fails
-        # User can still use the app
+    
+    # 4. Auto-assign to default workspace
+    await assign_user_to_default_workspace(new_user, db, mb_client)
     
     return new_user
 
@@ -223,7 +225,7 @@ async def login(
 ):
     """
     Login and get access token.
-    Supports both OAuth2 form data and JSON body.
+    Auto-assigns user to default workspace on first login.
     """
     # Prefer OAuth2 form (Swagger/clients)
     email = form_data.username
@@ -260,6 +262,14 @@ async def login(
             detail="Inactive user"
         )
     
+    # Auto-assign to default workspace if not already assigned
+    if not user.default_workspace_assigned:
+        try:
+            mb_client = get_metabase_client()
+            await assign_user_to_default_workspace(user, db, mb_client)
+        except Exception as ws_err:
+            logger.warning(f"Failed to assign default workspace: {ws_err}")
+    
     # Create access token
     token_data = {"sub": user.email}
     access_token = create_access_token(data=token_data)
@@ -270,38 +280,94 @@ async def login(
     }
 
 
-@router.get("/me", response_model=UserResponse)
-async def get_current_user_info(current_user: User = Depends(get_current_user)):
+async def assign_user_to_default_workspace(
+    user: User,
+    db: Session,
+    mb_client: MetabaseClient
+):
     """
-    Get current user information.
-    
-    Args:
-        current_user: Current authenticated user
+    Auto-assign user to default workspace.
+    Creates default workspace if it doesn't exist.
+    """
+    try:
+        from app.models import Workspace, WorkspaceMember
         
-    Returns:
-        User information including metabase_user_id
-    """
-    return current_user
-
-
-@router.post("/refresh", response_model=Token)
-async def refresh_token(current_user: User = Depends(get_current_user)):
-    """
-    Refresh access token.
-    
-    Args:
-        current_user: Current authenticated user
+        # Check if default workspace exists
+        default_ws = db.query(Workspace).filter_by(
+            is_default=True,
+            is_active=True
+        ).first()
         
-    Returns:
-        New access token
-    """
-    access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_access_token(
-        data={"sub": current_user.email},
-        expires_delta=access_token_expires
-    )
-    
-    return {
-        "access_token": access_token,
-        "token_type": "bearer"
-    }
+        if not default_ws:
+            logger.info("Creating default workspace...")
+            
+            # Create default workspace
+            default_ws = Workspace(
+                name="My Workspace",
+                description="Your personal workspace for dashboards",
+                owner_id=user.id,
+                is_default=True,
+                is_active=True
+            )
+            
+            db.add(default_ws)
+            db.flush()
+            
+            # Create Metabase collection for default workspace
+            try:
+                collection = await mb_client.create_collection(
+                    name="My Workspace",
+                    description="Default workspace collection"
+                )
+                
+                default_ws.metabase_collection_id = collection.get("id")
+                default_ws.metabase_collection_name = collection.get("name")
+                
+                # Create permission group
+                group = await mb_client.create_group(name="My Workspace Team")
+                default_ws.metabase_group_id = group.get("id")
+                default_ws.metabase_group_name = group.get("name")
+                
+                db.commit()
+                logger.info(f"Created default workspace with collection {default_ws.metabase_collection_id}")
+                
+            except Exception as mb_err:
+                logger.error(f"Failed to create Metabase resources: {mb_err}")
+                db.rollback()
+                raise
+        
+        # Add user to default workspace if not already member
+        is_member = db.query(WorkspaceMember).filter_by(
+            workspace_id=default_ws.id,
+            user_id=user.id
+        ).first()
+        
+        if not is_member:
+            member = WorkspaceMember(
+                workspace_id=default_ws.id,
+                user_id=user.id,
+                role="owner" if default_ws.owner_id == user.id else "editor"
+            )
+            db.add(member)
+            
+            # Add user to Metabase group
+            if user.metabase_user_id and default_ws.metabase_group_id:
+                try:
+                    await mb_client.add_user_to_group(
+                        user_id=user.metabase_user_id,
+                        group_id=default_ws.metabase_group_id
+                    )
+                    logger.info(f"Added user to default workspace group")
+                except Exception as group_err:
+                    logger.warning(f"Could not add user to group: {group_err}")
+        
+        # Mark user as assigned
+        user.default_workspace_assigned = True
+        db.commit()
+        
+        logger.info(f"User {user.email} assigned to default workspace")
+        
+    except Exception as e:
+        logger.error(f"Error assigning default workspace: {str(e)}")
+        db.rollback()
+        raise

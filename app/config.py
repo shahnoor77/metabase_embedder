@@ -1,6 +1,5 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import Optional
-import os
 
 class Settings(BaseSettings):
     # Application Database
@@ -23,19 +22,19 @@ class Settings(BaseSettings):
     METABASE_ADMIN_PASSWORD: str
     METABASE_EMBEDDING_SECRET: str
 
-    # Analytics DB (External)
-    ANALYTICS_DB_HOST: Optional[str] = None
-    ANALYTICS_DB_PORT: Optional[int] = None
-    ANALYTICS_DB_NAME: Optional[str] = None
-    ANALYTICS_DB_USER: Optional[str] = None
-    ANALYTICS_DB_PASSWORD: Optional[str] = None
+    # External Analytics Database (SQL Server running elsewhere)
+    ANALYTICS_DB_HOST: str
+    ANALYTICS_DB_PORT: int
+    ANALYTICS_DB_NAME: str
+    ANALYTICS_DB_USER: str
+    ANALYTICS_DB_PASSWORD: str
 
     ACCESS_TOKEN_EXPIRE_MINUTES: int
 
-    # Pydantic configuration to prevent 'extra_forbidden' errors
+    # Pydantic configuration
     model_config = SettingsConfigDict(
         env_file=".env",
-        extra="ignore", # This ignores any extra keys in .env
+        extra="ignore",
         case_sensitive=True
     )
 

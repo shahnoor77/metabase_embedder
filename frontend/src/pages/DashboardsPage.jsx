@@ -1,171 +1,304 @@
 import { useState, useEffect } from 'react'
-import { AnimatePresence } from 'framer-motion'
-import { workspaceAPI, dashboardAPI } from '../services/api'
-import Loading from '../components/Common/Loading'
-import DashboardCard from '../components/Dashboard/DashboardCard'
-import DashboardViewer from '../components/Dashboard/DashboardViewer'
+import { useNavigate } from 'react-router-dom'
+import { motion } from 'framer-motion'
+import { Plus, BarChart3, Edit2, Eye, Trash2 } from 'lucide-react'
 import toast from 'react-hot-toast'
+import axios from 'axios'
+import Loading from '../components/Common/Loading'
+
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
 export default function DashboardsPage() {
-  const [workspaces, setWorkspaces] = useState([])
-  const [selectedWorkspace, setSelectedWorkspace] = useState(null)
+  const navigate = useNavigate()
   const [dashboards, setDashboards] = useState([])
   const [loading, setLoading] = useState(true)
-  const [searchQuery, setSearchQuery] = useState('')
-  const [viewingDashboard, setViewingDashboard] = useState(null)
+  const [workspaces, setWorkspaces] = useState([])
   const [showCreateModal, setShowCreateModal] = useState(false)
-  const [creating, setCreating] = useState(false)
-  const [newDashboard, setNewDashboard] = useState({ name: '' })
+  const [createForm, setCreateForm] = useState({
+    name: '',
+    description: '',
+    workspace_id: null
+  })
 
   useEffect(() => {
-    loadWorkspaces()
+    loadData()
   }, [])
 
-  useEffect(() => {
-    if (selectedWorkspace) {
-      loadDashboards()
-    }
-  }, [selectedWorkspace])
-
-  const loadWorkspaces = async () => {
+  const loadData = async () => {
     try {
-      const response = await workspaceAPI.getAll()
-      if (response.data.length > 0) {
-        setWorkspaces(response.data)
-        setSelectedWorkspace(response.data[0])
-      }
+      setLoading(true)
+      const token = localStorage.getItem('access_token')
+      
+      // Fetch workspaces
+      const wsRes = await axios.get(`${API_BASE_URL}/api/workspaces`, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      setWorkspaces(wsRes.data)
+      
+      // Fetch user's dashboards
+      const dashRes = await axios.get(`${API_BASE_URL}/api/dashboards/my-dashboards`, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      setDashboards(dashRes.data)
     } catch (error) {
-      toast.error('Failed to load workspaces')
+      toast.error('Failed to load dashboards')
+      console.error(error)
     } finally {
       setLoading(false)
     }
   }
 
-  const loadDashboards = async () => {
+  const handleCreateDashboard = async (e) => {
+    e.preventDefault()
+    
+    if (!createForm.name.trim()) {
+      toast.error('Dashboard name is required')
+      return
+    }
+    
+    if (!createForm.workspace_id) {
+      toast.error('Please select a workspace')
+      return
+    }
+
     try {
-      // Now using the workspace ID in the path
-      const response = await dashboardAPI.getAll(selectedWorkspace.id)
-      setDashboards(response.data)
+      const token = localStorage.getItem('access_token')
+      
+      const response = await axios.post(
+        `${API_BASE_URL}/api/dashboards`,
+        {
+          name: createForm.name,
+          description: createForm.description,
+          workspace_id: createForm.workspace_id
+        },
+        { headers: { Authorization: `Bearer ${token}` } }
+      )
+      
+      toast.success('Dashboard created successfully!')
+      setDashboards([...dashboards, response.data])
+      setCreateForm({ name: '', description: '', workspace_id: null })
+      setShowCreateModal(false)
+      
     } catch (error) {
-      toast.error('Failed to load dashboards')
+      toast.error(error.response?.data?.detail || 'Failed to create dashboard')
     }
   }
 
-  const handleViewDashboard = async (dashboard) => {
-    const loadingToast = toast.loading('Securing connection...')
+  const handleDeleteDashboard = async (dashboardId) => {
+    if (!window.confirm('Are you sure you want to delete this dashboard?')) {
+      return
+    }
+
     try {
-      // Fetch the signed JWT URL from the backend
-      const response = await dashboardAPI.getEmbedUrl(dashboard.id)
-      setViewingDashboard({
-        ...dashboard,
-        embed_url: response.data.url // The signed Metabase URL
-      })
-      toast.dismiss(loadingToast)
+      const token = localStorage.getItem('access_token')
+      await axios.delete(
+        `${API_BASE_URL}/api/dashboards/${dashboardId}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      )
+      
+      toast.success('Dashboard deleted')
+      setDashboards(dashboards.filter(d => d.id !== dashboardId))
     } catch (error) {
-      toast.error('Failed to generate secure embed link')
-      toast.dismiss(loadingToast)
+      toast.error('Failed to delete dashboard')
     }
   }
 
-  const filteredDashboards = dashboards.filter((d) =>
-    (d.metabase_dashboard_name || d.name || '').toLowerCase().includes(searchQuery.toLowerCase())
-  )
+  const handleViewDashboard = (dashboardId) => {
+    navigate(`/dashboard/${dashboardId}/view`)
+  }
 
-  if (loading) return <Loading fullScreen={false} />
+  const handleEditDashboard = (dashboardId) => {
+    navigate(`/dashboard/${dashboardId}/edit`)
+  }
+
+  if (loading) {
+    return <Loading fullScreen={false} />
+  }
 
   return (
     <div className="space-y-6">
+      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Dashboards</h1>
-          <p className="text-gray-600 mt-1">
-            Create dashboards in this workspace and view them here.
-          </p>
+          <h1 className="text-3xl font-bold text-gray-900">Your Dashboards</h1>
+          <p className="text-gray-600 mt-1">Create and manage your analytics dashboards</p>
         </div>
+        
         <button
           onClick={() => setShowCreateModal(true)}
-          className="btn-primary flex items-center space-x-2"
-          disabled={!selectedWorkspace}
+          className="btn-primary inline-flex items-center space-x-2"
         >
-          <span>New Dashboard</span>
+          <Plus className="w-5 h-5" />
+          <span>Create Dashboard</span>
         </button>
       </div>
 
-      {workspaces.length > 0 && (
-        <div className="card">
-          <label className="block text-sm font-medium text-gray-700 mb-2">Workspace</label>
-          <select
-            value={selectedWorkspace?.id || ''}
-            onChange={(e) => setSelectedWorkspace(workspaces.find(w => w.id === parseInt(e.target.value)))}
-            className="input-field"
+      {/* Create Modal */}
+      {showCreateModal && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+          onClick={() => setShowCreateModal(false)}
+        >
+          <motion.div
+            initial={{ scale: 0.95 }}
+            animate={{ scale: 1 }}
+            className="bg-white rounded-xl p-6 max-w-md w-full"
+            onClick={(e) => e.stopPropagation()}
           >
-            {workspaces.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
-          </select>
-        </div>
+            <h2 className="text-2xl font-bold text-gray-900 mb-4">Create New Dashboard</h2>
+            
+            <form onSubmit={handleCreateDashboard} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Workspace <span className="text-red-500">*</span>
+                </label>
+                <select
+                  value={createForm.workspace_id || ''}
+                  onChange={(e) => setCreateForm({
+                    ...createForm,
+                    workspace_id: parseInt(e.target.value)
+                  })}
+                  className="input-field"
+                  required
+                >
+                  <option value="">Select a workspace...</option>
+                  {workspaces.map(ws => (
+                    <option key={ws.id} value={ws.id}>{ws.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Dashboard Name <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={createForm.name}
+                  onChange={(e) => setCreateForm({...createForm, name: e.target.value})}
+                  className="input-field"
+                  placeholder="e.g., Sales Dashboard"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Description
+                </label>
+                <textarea
+                  value={createForm.description}
+                  onChange={(e) => setCreateForm({...createForm, description: e.target.value})}
+                  className="input-field"
+                  placeholder="Optional description"
+                  rows="3"
+                />
+              </div>
+
+              <div className="flex space-x-3 pt-4">
+                <button
+                  type="button"
+                  onClick={() => setShowCreateModal(false)}
+                  className="flex-1 btn-secondary"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 btn-primary"
+                >
+                  Create Dashboard
+                </button>
+              </div>
+            </form>
+          </motion.div>
+        </motion.div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {filteredDashboards.map((d, i) => (
-          <DashboardCard key={d.id} dashboard={d} index={i} onView={handleViewDashboard} />
-        ))}
-      </div>
-
-      <AnimatePresence>
-        {viewingDashboard && (
-          <DashboardViewer dashboard={viewingDashboard} onClose={() => setViewingDashboard(null)} />
-        )}
-      </AnimatePresence>
-
-      {showCreateModal && (
-        <div className="card p-6 space-y-4">
-          <h3 className="text-lg font-semibold text-gray-900">Create Dashboard</h3>
-          <form
-            onSubmit={async (e) => {
-              e.preventDefault()
-              if (!selectedWorkspace) return
-              setCreating(true)
-              try {
-                await dashboardAPI.create({
-                  workspace_id: selectedWorkspace.id,
-                  name: newDashboard.name,
-                })
-                toast.success('Dashboard created successfully!')
-                setShowCreateModal(false)
-                setNewDashboard({ name: '' })
-                loadDashboards()
-              } catch (error) {
-                toast.error(error.response?.data?.detail || 'Failed to create dashboard')
-              } finally {
-                setCreating(false)
-              }
-            }}
-            className="space-y-4"
+      {/* Dashboards Grid */}
+      {dashboards.length === 0 ? (
+        <div className="card text-center py-12">
+          <BarChart3 className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+          <h3 className="text-lg font-medium text-gray-900 mb-2">No dashboards yet</h3>
+          <p className="text-gray-600 mb-6">Create your first dashboard to get started</p>
+          <button
+            onClick={() => setShowCreateModal(true)}
+            className="btn-primary inline-flex items-center space-x-2"
           >
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Dashboard Name</label>
-              <input
-                type="text"
-                className="input-field"
-                placeholder="e.g., Sales Overview"
-                value={newDashboard.name}
-                onChange={(e) => setNewDashboard({ name: e.target.value })}
-                required
-              />
-            </div>
-            <div className="flex space-x-2">
-              <button
-                type="button"
-                className="btn-secondary flex-1"
-                onClick={() => setShowCreateModal(false)}
-                disabled={creating}
-              >
-                Cancel
-              </button>
-              <button type="submit" className="btn-primary flex-1" disabled={creating}>
-                {creating ? 'Creating...' : 'Create'}
-              </button>
-            </div>
-          </form>
+            <Plus className="w-5 h-5" />
+            <span>Create Dashboard</span>
+          </button>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {dashboards.map((dashboard, index) => (
+            <motion.div
+              key={dashboard.id}
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: index * 0.1 }}
+              className="card hover:shadow-lg transition-all group"
+            >
+              <div className="flex items-start justify-between mb-4">
+                <div className="w-12 h-12 bg-primary-100 rounded-lg flex items-center justify-center">
+                  <BarChart3 className="w-6 h-6 text-primary-600" />
+                </div>
+                {dashboard.is_owner && (
+                  <span className="px-2 py-1 bg-primary-100 text-primary-700 text-xs font-medium rounded">
+                    Owner
+                  </span>
+                )}
+              </div>
+
+              <h3 className="font-bold text-gray-900 mb-1">{dashboard.metabase_dashboard_name}</h3>
+              
+              {dashboard.description && (
+                <p className="text-sm text-gray-600 mb-4">{dashboard.description}</p>
+              )}
+
+              <div className="flex items-center justify-between pt-4 border-t border-gray-200">
+                <div className="flex items-center space-x-2">
+                  {dashboard.is_published ? (
+                    <span className="text-xs text-green-600">✓ Published</span>
+                  ) : (
+                    <span className="text-xs text-gray-500">Draft</span>
+                  )}
+                </div>
+
+                <div className="flex items-center space-x-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button
+                    onClick={() => handleViewDashboard(dashboard.id)}
+                    className="p-1.5 hover:bg-gray-100 rounded text-gray-600 hover:text-primary-600"
+                    title="View"
+                  >
+                    <Eye className="w-4 h-4" />
+                  </button>
+                  
+                  {dashboard.is_owner && (
+                    <>
+                      <button
+                        onClick={() => handleEditDashboard(dashboard.id)}
+                        className="p-1.5 hover:bg-gray-100 rounded text-gray-600 hover:text-primary-600"
+                        title="Edit"
+                      >
+                        <Edit2 className="w-4 h-4" />
+                      </button>
+                      
+                      <button
+                        onClick={() => handleDeleteDashboard(dashboard.id)}
+                        className="p-1.5 hover:bg-gray-100 rounded text-gray-600 hover:text-red-600"
+                        title="Delete"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+            </motion.div>
+          ))}
         </div>
       )}
     </div>
