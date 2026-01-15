@@ -1,12 +1,10 @@
 import { NavLink } from 'react-router-dom'
-import { Home, Briefcase, BarChart3, Plus, Settings } from 'lucide-react'
+import { Home, BarChart3, Settings } from 'lucide-react'
 import { motion } from 'framer-motion'
 
 const navItems = [
   { path: '/', icon: Home, label: 'Home' },
-  { path: '/workspaces', icon: Briefcase, label: 'Workspaces' },
   { path: '/dashboards', icon: BarChart3, label: 'Dashboards' },
-  { path: '/create', icon: Plus, label: 'Create New' },
   { path: '/settings', icon: Settings, label: 'Settings' },
 ]
 

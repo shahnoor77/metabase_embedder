@@ -9,7 +9,7 @@ export const authService = {
     } catch (error) {
       return {
         success: false,
-        error: error.response?.data?.detail || 'Login failed',
+        error: error.response?.data?.detail || error.response?.data?.error || 'Login failed',
       }
     }
   },
@@ -26,7 +26,7 @@ export const authService = {
     } catch (error) {
       return {
         success: false,
-        error: error.response?.data?.detail || 'Registration failed',
+        error: error.response?.data?.detail || error.response?.data?.error || 'Registration failed',
       }
     }
   },

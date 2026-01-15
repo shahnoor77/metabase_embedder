@@ -7,7 +7,7 @@ const api = axios.create({
 const API_PREFIX = '/api';
 
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('token');
+  const token = localStorage.getItem('access_token');
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
@@ -42,10 +42,14 @@ export const workspaceAPI = {
 
 export const dashboardAPI = {
   // Triggers the Backend Auto-Sync and returns the dashboard list
-  getAll: (workspaceId) => api.get(`${API_PREFIX}/workspaces/${workspaceId}/dashboards`),
+  // for the user's default workspace (auto-created if missing)
+  getAll: () => api.get(`${API_PREFIX}/workspaces/default/dashboards`),
   
   // Gets the JWT-signed URL for a specific dashboard
   getEmbedUrl: (id) => api.get(`${API_PREFIX}/workspaces/dashboards/${id}/embed`),
+
+  // Opens Metabase dashboard editor in a new tab (backend returns the URL)
+  getNewDashboardEditorUrl: () => api.post(`${API_PREFIX}/workspaces/default/new-dashboard-editor-url`),
 };
 
 export default api;

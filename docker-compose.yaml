@@ -5,10 +5,12 @@ services:
   postgres_app:
     image: postgres:15-alpine
     container_name: metabase_app_postgres
+    env_file:
+      - .env
     environment:
-      POSTGRES_DB: metabase_app
-      POSTGRES_USER: app_user
-      POSTGRES_PASSWORD: app123
+      POSTGRES_DB: ${APP_DB_NAME}
+      POSTGRES_USER: ${APP_DB_USER}
+      POSTGRES_PASSWORD: ${APP_DB_PASSWORD}
     volumes:
       - postgres_app_data:/var/lib/postgresql/data
     networks:
@@ -21,35 +23,16 @@ services:
       timeout: 5s
       retries: 5
 
-  # PostgreSQL for analytics/sample data that users will query
-  postgres_analytics:
-    image: postgres:15-alpine
-    container_name: metabase_analytics_postgres
-    environment:
-      POSTGRES_DB: analytics
-      POSTGRES_USER: analytics_user
-      POSTGRES_PASSWORD: analytics123
-    volumes:
-      - postgres_analytics_data:/var/lib/postgresql/data
-      - ./init-analytics.sql:/docker-entrypoint-initdb.d/init.sql
-    networks:
-      - metabase_network
-    ports:
-      - "5433:5432"
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U analytics_user -d analytics"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
   # PostgreSQL for Metabase application database
   postgres_metabase:
     image: postgres:15-alpine
     container_name: metabase_postgres
+    env_file:
+      - .env
     environment:
-      POSTGRES_DB: metabase
-      POSTGRES_USER: metabase_user
-      POSTGRES_PASSWORD: metabase123
+      POSTGRES_DB: ${MB_DB_DBNAME}
+      POSTGRES_USER: ${MB_DB_USER}
+      POSTGRES_PASSWORD: ${MB_DB_PASSWORD}
     volumes:
       - postgres_metabase_data:/var/lib/postgresql/data
     networks:
@@ -64,15 +47,17 @@ services:
   metabase:
     image: metabase/metabase:latest
     container_name: metabase
+    env_file:
+      - .env
     environment:
-      MB_DB_TYPE: postgres
-      MB_DB_DBNAME: metabase
-      MB_DB_PORT: 5432
-      MB_DB_USER: metabase_user
-      MB_DB_PASS: metabase123
-      MB_DB_HOST: postgres_metabase
-      METABASE_EMBEDDING_SECRET: d5b90399855d9ada872b285d0b65d52b60d6414d9eb5859db5f61e5e34a12772
-      MB_SITE_URL: http://localhost:3000
+      MB_DB_TYPE: ${MB_DB_TYPE}
+      MB_DB_DBNAME: ${MB_DB_DBNAME}
+      MB_DB_PORT: ${MB_DB_PORT}
+      MB_DB_USER: ${MB_DB_USER}
+      MB_DB_PASS: ${MB_DB_PASSWORD}
+      MB_DB_HOST: ${MB_DB_HOST}
+      METABASE_EMBEDDING_SECRET: ${METABASE_EMBEDDING_SECRET}
+      MB_SITE_URL: ${MB_SITE_URL}
     ports:
       - "3000:3000"
     networks:
@@ -95,21 +80,27 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: metabase_backend
+    env_file:
+      - .env
     environment:
-      DATABASE_URL: postgresql://app_user:app123@postgres_app:5432/metabase_app
-      METABASE_URL: http://metabase:3000
-      METABASE_PUBLIC_URL: http://localhost:3000
-      METABASE_ADMIN_EMAIL: admin@metabase.local
-      METABASE_ADMIN_PASSWORD: admin123@metabase*
-      METABASE_EMBEDDING_SECRET: d5b90399855d9ada872b285d0b65d52b60d6414d9eb5859db5f61e5e34a12772 
-      ANALYTICS_DB_HOST: postgres_analytics
-      ANALYTICS_DB_PORT: 5432
-      ANALYTICS_DB_NAME: analytics
-      ANALYTICS_DB_USER: analytics_user
-      ANALYTICS_DB_PASSWORD: analytics123
-      JWT_SECRET: yourjwttockentouseinapplication334445566
-      JWT_ALGORITHM: HS256
-      ACCESS_TOKEN_EXPIRE_MINUTES: 30
+      DATABASE_URL: ${DATABASE_URL}
+      METABASE_URL: ${METABASE_URL}
+      METABASE_PUBLIC_URL: ${METABASE_PUBLIC_URL}
+      METABASE_ADMIN_EMAIL: ${METABASE_ADMIN_EMAIL}
+      METABASE_ADMIN_PASSWORD: ${METABASE_ADMIN_PASSWORD}
+      METABASE_EMBEDDING_SECRET: ${METABASE_EMBEDDING_SECRET}
+      # SQL Server Analytics Database (Default Analysis DB)
+      ANALYTICS_DB_ENGINE: ${ANALYTICS_DB_ENGINE}
+      ANALYTICS_DB_HOST: ${ANALYTICS_DB_HOST}
+      ANALYTICS_DB_PORT: ${ANALYTICS_DB_PORT}
+      ANALYTICS_DB_NAME: ${ANALYTICS_DB_NAME}
+      ANALYTICS_DB_USER: ${ANALYTICS_DB_USER}
+      ANALYTICS_DB_PASSWORD: ${ANALYTICS_DB_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_ALGORITHM: ${JWT_ALGORITHM}
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES}
+      # Optional: pin a single default workspace for all users
+      # DEFAULT_WORKSPACE_ID: ${DEFAULT_WORKSPACE_ID}
     ports:
       - "8000:8000"
     networks:
@@ -140,8 +131,10 @@ services:
       context: .
       dockerfile: Dockerfile.frontend
     container_name: react-frontend
+    env_file:
+      - .env
     environment:
-      - VITE_API_URL=http://localhost:8000
+      - VITE_API_URL=${VITE_API_URL}
     ports:
       - "5173:5173"
     depends_on:
@@ -159,6 +152,5 @@ networks:
 
 volumes:
   postgres_app_data:
-  postgres_analytics_data:
   postgres_metabase_data:
   metabase_data:

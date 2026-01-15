@@ -120,7 +120,7 @@ async def lifespan(app: FastAPI):
                 
                 db_result = await mb_client.add_database(
                     name="Analytics Database",
-                    engine="postgres",
+                    engine=getattr(settings, "ANALYTICS_DB_ENGINE", "postgres"),
                     host=settings.ANALYTICS_DB_HOST,
                     port=settings.ANALYTICS_DB_PORT,
                     dbname=settings.ANALYTICS_DB_NAME,
@@ -211,6 +211,8 @@ async def http_exception_handler(request, exc):
     return JSONResponse(
         status_code=exc.status_code,
         content={
+            # Keep both keys for backwards compatibility across frontend callers
+            "detail": exc.detail,
             "error": exc.detail,
             "status_code": exc.status_code
         }

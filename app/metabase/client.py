@@ -257,19 +257,26 @@ class MetabaseClient:
     ) -> Optional[Dict]:
         """Connects a new database to Metabase."""
         await self._get_session_token()
-        
+
+        # Metabase expects engine-specific connection "details".
+        # For postgres, "dbname" is standard; for sqlserver, Metabase uses the same "dbname" key.
+        # (If your SQL Server requires extra fields like instanceName or domain, add them here.)
+        normalized_engine = (engine or "").lower().strip()
+        if normalized_engine in ["mssql", "sqlserver", "sql_server"]:
+            normalized_engine = "sqlserver"
+
         details = {
             "host": host,
             "port": int(port),
             "dbname": dbname,
             "user": user,
             "password": password,
-            "ssl": False
+            "ssl": False,
         }
         
         payload = {
             "name": name,
-            "engine": engine,
+            "engine": normalized_engine,
             "details": details,
             "auto_run_queries": True,
             "is_full_sync": True

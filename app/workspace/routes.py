@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 from app.database import get_db
 from app.models import User, Workspace, WorkspaceMember, Dashboard
-from app.auth.routes import get_current_user
+from app.auth.dependencies import get_current_user
 from app.metabase.client import MetabaseClient
 from app.config import Settings
 
@@ -69,6 +69,10 @@ class DashboardResponse(BaseModel):
 class EmbeddedUrlResponse(BaseModel):
     url: str
     expires_in_minutes: int
+
+
+class NewDashboardEditorUrlResponse(BaseModel):
+    url: str
 
 
 # ==================== Internal Logic (The Sync Engine) ====================
@@ -144,6 +148,78 @@ async def sync_workspace_dashboards_logic(
         logger.error(f"Dashboard sync failed for workspace {workspace_id}: {str(e)}")
         db.rollback()
         raise
+
+
+async def get_or_create_default_workspace_for_user(
+    current_user: User,
+    db: Session,
+    mb_client: MetabaseClient,
+) -> Workspace:
+    """
+    Resolve a 'default' workspace for the current user.
+    - If DEFAULT_WORKSPACE_ID is set and exists, use it.
+    - Else use the first workspace the user is a member of.
+    - If none exist, auto-create a simple default workspace + Metabase collection.
+    """
+    # 1) Explicit default from settings, if configured
+    workspace: Optional[Workspace] = None
+    if getattr(settings, "DEFAULT_WORKSPACE_ID", None):
+        workspace = db.query(Workspace).filter(
+            Workspace.id == settings.DEFAULT_WORKSPACE_ID,
+            Workspace.is_active == True,
+        ).first()
+
+    # 2) Fallback: first workspace where user is a member
+    if not workspace:
+        workspace = (
+            db.query(Workspace)
+            .join(WorkspaceMember, Workspace.id == WorkspaceMember.workspace_id)
+            .filter(
+                WorkspaceMember.user_id == current_user.id,
+                Workspace.is_active == True,
+            )
+            .first()
+        )
+
+    # 3) Auto-provision a very simple default workspace if none exists
+    if not workspace:
+        logger.info(f"No workspace found for user {current_user.email}, creating default workspace")
+
+        # Create a Metabase collection to back this workspace
+        default_name = "Default Workspace"
+        default_description = "Auto-provisioned default workspace"
+        collection = await mb_client.create_collection(
+            name=default_name,
+            description=default_description,
+        )
+        collection_id = collection.get("id")
+        collection_name = collection.get("name")
+
+        # Persist workspace in app DB
+        workspace = Workspace(
+            name=default_name,
+            description=default_description,
+            owner_id=current_user.id,
+            metabase_collection_id=collection_id,
+            metabase_collection_name=collection_name,
+            is_active=True,
+        )
+        db.add(workspace)
+        db.commit()
+        db.refresh(workspace)
+
+        # Add owner as member
+        member = WorkspaceMember(
+            workspace_id=workspace.id,
+            user_id=current_user.id,
+            role="owner",
+        )
+        db.add(member)
+        db.commit()
+
+        logger.info(f"Created default workspace {workspace.id} for {current_user.email}")
+
+    return workspace
 
 
 # ==================== Workspace Routes ====================
@@ -427,6 +503,36 @@ async def list_dashboards(
     return dashboards
 
 
+@router.get("/default/dashboards", response_model=List[DashboardResponse])
+async def list_default_dashboards(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    mb_client: MetabaseClient = Depends(get_metabase_client),
+):
+    """
+    List dashboards for the user's default workspace.
+    Automatically creates the default workspace if it does not exist yet.
+    """
+    # Resolve or create default workspace
+    workspace = await get_or_create_default_workspace_for_user(current_user, db, mb_client)
+
+    # Sync dashboards from Metabase
+    try:
+        await sync_workspace_dashboards_logic(workspace.id, db, mb_client)
+    except Exception as sync_err:
+        logger.error(f"Dashboard sync failed (default workspace): {sync_err}")
+
+    # Ensure embedding is enabled for all dashboards
+    dashboards = db.query(Dashboard).filter(Dashboard.workspace_id == workspace.id).all()
+    for dash in dashboards:
+        try:
+            await mb_client.ensure_dashboard_embedding(dash.metabase_dashboard_id)
+        except Exception as embed_err:
+            logger.warning(f"Failed to ensure embedding for dashboard {dash.id}: {embed_err}")
+
+    return dashboards
+
+
 @router.get("/dashboards/{dashboard_id}/embed", response_model=EmbeddedUrlResponse)
 async def get_dashboard_embed_url(
     dashboard_id: int,
@@ -561,4 +667,51 @@ async def get_workspace_collection_url(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Could not generate secure embedding link."
         )
+
+
+@router.post("/default/new-dashboard-editor-url", response_model=NewDashboardEditorUrlResponse)
+async def new_dashboard_editor_url(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    mb_client: MetabaseClient = Depends(get_metabase_client),
+):
+    """
+    Create a new Metabase dashboard in the DEFAULT workspace collection and return the editor URL.
+
+    Notes:
+    - This opens the Metabase native editor UI in a new tab.
+    - Admin/settings visibility is controlled by Metabase permissions (user is NOT a superuser).
+    """
+    # 1) Resolve or auto-create default workspace
+    workspace = await get_or_create_default_workspace_for_user(current_user, db, mb_client)
+
+    if not workspace.metabase_collection_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Default workspace has no Metabase collection configured",
+        )
+
+    # 2) Ensure Metabase group membership (limits UI access: no admin/settings)
+    if workspace.metabase_group_id and current_user.metabase_user_id:
+        try:
+            await mb_client.add_user_to_group(
+                user_id=current_user.metabase_user_id,
+                group_id=workspace.metabase_group_id,
+            )
+        except Exception as e:
+            logger.warning(f"Failed to ensure Metabase group membership: {e}")
+
+    # 3) Create dashboard in Metabase
+    dashboard_name = f"New Dashboard ({int(time.time())})"
+    mb_dashboard = await mb_client.create_dashboard(
+        name=dashboard_name,
+        collection_id=workspace.metabase_collection_id,
+    )
+    mb_dashboard_id = mb_dashboard.get("id")
+    if not mb_dashboard_id:
+        raise HTTPException(status_code=500, detail="Failed to create dashboard in Metabase")
+
+    # 4) Return the editor URL (Metabase app UI)
+    editor_url = f"{settings.METABASE_PUBLIC_URL.rstrip('/')}/dashboard/{mb_dashboard_id}?edit=true"
+    return {"url": editor_url}
         

@@ -4,9 +4,7 @@ import Layout from './components/Layout/Layout'
 import Login from './components/Layout/Auth/Login'
 import Register from './components/Layout/Auth/Register'
 import HomePage from './pages/HomePage'
-import WorkspacesPage from './pages/WorkspacesPage'
 import DashboardsPage from './pages/DashboardsPage'
-import CreatePage from './pages/CreatePage'
 import SettingsPage from './pages/SettingsPage'
 import Loading from './components/Common/Loading'
 
@@ -51,10 +49,11 @@ function App() {
           </PrivateRoute>
         }>
           <Route index element={<HomePage />} />
-          <Route path="workspaces" element={<WorkspacesPage />} />
           <Route path="dashboards" element={<DashboardsPage />} />
-          <Route path="create" element={<CreatePage />} />
           <Route path="settings" element={<SettingsPage />} />
+          {/* Back-compat routes */}
+          <Route path="workspaces" element={<Navigate to="/dashboards" replace />} />
+          <Route path="create" element={<Navigate to="/dashboards" replace />} />
         </Route>
       </Routes>
     </Router>

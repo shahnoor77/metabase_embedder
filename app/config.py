@@ -24,11 +24,15 @@ class Settings(BaseSettings):
     METABASE_EMBEDDING_SECRET: str
 
     # Analytics DB (External)
+    ANALYTICS_DB_ENGINE: str = "postgres"  # postgres | sqlserver
     ANALYTICS_DB_HOST: Optional[str] = None
     ANALYTICS_DB_PORT: Optional[int] = None
     ANALYTICS_DB_NAME: Optional[str] = None
     ANALYTICS_DB_USER: Optional[str] = None
     ANALYTICS_DB_PASSWORD: Optional[str] = None
+
+    # Default workspace (single workspace for all users)
+    DEFAULT_WORKSPACE_ID: Optional[int] = None
 
     ACCESS_TOKEN_EXPIRE_MINUTES: int
 

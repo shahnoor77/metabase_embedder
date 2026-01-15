@@ -8,22 +8,40 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    const token = localStorage.getItem('token')
-    const userEmail = localStorage.getItem('userEmail')
-    
-    if (token && userEmail) {
-      setUser({ email: userEmail, token })
+    const bootstrap = async () => {
+      const token = localStorage.getItem('access_token')
+      if (!token) {
+        setLoading(false)
+        return
+      }
+
+      // Best-effort: load current user from backend so frontend matches backend truth
+      const me = await authService.getMe()
+      if (me.success) {
+        setUser({ ...me.data, token })
+      } else {
+        // token likely invalid/expired
+        localStorage.removeItem('access_token')
+        setUser(null)
+      }
+      setLoading(false)
     }
-    
-    setLoading(false)
+
+    bootstrap()
   }, [])
 
   const login = async (email, password) => {
     const result = await authService.login(email, password)
     if (result.success) {
-      localStorage.setItem('token', result.data.access_token)
-      localStorage.setItem('userEmail', email)
-      setUser({ email, token: result.data.access_token })
+      localStorage.setItem('access_token', result.data.access_token)
+
+      // Fetch /me so we store a consistent user object
+      const me = await authService.getMe()
+      if (me.success) {
+        setUser({ ...me.data, token: result.data.access_token })
+      } else {
+        setUser({ email, token: result.data.access_token })
+      }
     }
     return result
   }
@@ -32,17 +50,11 @@ export const AuthProvider = ({ children }) => {
     const result = await authService.register(email, password, firstName, lastName)
     // Backend returns UserResponse (not Token) after signup
     // User needs to login separately to get access token
-    if (result.success) {
-      // Store email for potential auto-login, but don't set token yet
-      localStorage.setItem('userEmail', email)
-      // Note: User will need to login after signup to get access token
-    }
     return result
   }
 
   const logout = () => {
-    localStorage.removeItem('token')
-    localStorage.removeItem('userEmail')
+    localStorage.removeItem('access_token')
     setUser(null)
   }
 
